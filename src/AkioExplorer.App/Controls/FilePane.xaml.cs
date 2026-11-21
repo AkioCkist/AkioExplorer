@@ -34,6 +34,7 @@ public sealed partial class FilePane : UserControl
     private CancellationTokenSource? _suggestCts;
     private readonly DragDropBroker _drag = App.Services.GetRequiredService<DragDropBroker>();
     private readonly ClipboardService _clipboard = App.Services.GetRequiredService<ClipboardService>();
+    private readonly ThumbnailService _thumbnails = App.Services.GetRequiredService<ThumbnailService>();
     private FileItemViewModel? _dropTarget;
     private readonly ILogger<FilePane> _log = App.Services.GetRequiredService<ILogger<FilePane>>();
     private string? _externalDragRoot;
@@ -184,9 +185,16 @@ public sealed partial class FilePane : UserControl
 
     private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        // Lazy icons: only rows that are actually realised on screen request a shell icon.
-        if (!args.InRecycleQueue && args.Item is FileItemViewModel vm)
-            vm.EnsureIcon(sender is GridView ? IconSize.Large : IconSize.Small);
+        // Lazy icons: only rows that are actually realised on screen request a shell icon (and, in grid view, a
+        // picture thumbnail; a recycled tile cancels its pending thumbnail).
+        if (args.Item is not FileItemViewModel vm) return;
+        if (args.InRecycleQueue)
+        {
+            if (sender is GridView) _thumbnails.Cancel(vm);
+            return;
+        }
+        vm.EnsureIcon(sender is GridView ? IconSize.Large : IconSize.Small);
+        if (sender is GridView) _thumbnails.Request(vm, ViewModel?.Provider);
     }
 
     private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)

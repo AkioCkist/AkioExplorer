@@ -130,6 +130,7 @@ public partial class App : Application
 
         // App services
         services.AddSingleton<IconService>();
+        services.AddSingleton<ThumbnailService>();
         services.AddSingleton<DialogService>();
         services.AddSingleton<FavoritesService>();
         services.AddSingleton<ThemeService>();

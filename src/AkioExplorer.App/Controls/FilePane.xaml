@@ -38,15 +38,19 @@
         </DataTemplate>
 
         <DataTemplate x:Key="GridTileTemplate" x:DataType="vm:FileItemViewModel">
-            <Grid Width="108" Height="116" Padding="6,8,6,4" RowSpacing="4" Opacity="{x:Bind Opacity, Mode=OneWay}">
+            <Grid Width="108" Height="132" Padding="6,8,6,4" RowSpacing="4" Opacity="{x:Bind Opacity, Mode=OneWay}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="48" />
+                    <RowDefinition Height="64" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <Border x:Name="TileDropHighlight" x:Load="{x:Bind IsDropTarget, Mode=OneWay}" Grid.RowSpan="2" Margin="-6,-8,-6,-4"
                         CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                         Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
-                <Image Source="{x:Bind LargeIcon, Mode=OneWay}" Width="48" Height="48" />
+                <!-- Type icon until (and unless) a picture thumbnail arrives -->
+                <Image Source="{x:Bind LargeIcon, Mode=OneWay}" Width="48" Height="48"
+                       Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasThumbnail), Mode=OneWay}" />
+                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform"
+                       Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}" />
                 <StackPanel Grid.Row="1" Spacing="4">
                     <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"
                                TextTrimming="CharacterEllipsis" Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}" />

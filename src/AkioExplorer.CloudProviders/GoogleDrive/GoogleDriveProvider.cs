@@ -22,13 +22,13 @@ namespace AkioExplorer.CloudProviders.GoogleDrive;
 /// without extra requests. <see cref="CombinePath"/> returns a virtual "parentId/name" address that
 /// <see cref="GetItemAsync"/> resolves by name, which lets the generic copy engine check for conflicts.
 /// </summary>
-public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider
+public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider
 {
     public const string ServiceName = "Google Drive";
     public const string Root = "root";
     private const string FolderMime = "application/vnd.google-apps.folder";
     private const string ShortcutMime = "application/vnd.google-apps.shortcut";
-    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType)";
+    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink";
 
     private const string ApiBase = "https://www.googleapis.com/drive/v3";
     private const int UploadChunkSize = 8 * 1024 * 1024; // multiple of 256 KiB as the resumable protocol requires
@@ -38,6 +38,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     private readonly HttpClient _http;
     private readonly ConcurrentDictionary<string, (string Name, string? Parent)> _nodes = new();
     private readonly ConcurrentDictionary<string, string> _mimeById = new();
+    private readonly ConcurrentDictionary<string, string> _thumbnailById = new();
     private readonly ConcurrentDictionary<string, string> _resolvedFolders = new();
     private string? _rootId;
 
@@ -260,6 +261,31 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         IsNative(file, out var mime) && ExportFormat(mime) is { } format && !file.Name.EndsWith(format.Extension, StringComparison.OrdinalIgnoreCase)
             ? file.Name + format.Extension
             : file.Name;
+
+    // ------------------------------------------------------------------ thumbnails
+
+    public bool MayHaveThumbnail(StorageItem file) => _thumbnailById.ContainsKey(file.Path);
+
+    /// <summary>
+    /// Drive renders thumbnails for photos, videos, PDFs, Office files and Google Docs/Sheets/Slides. The listing's
+    /// short-lived <c>thumbnailLink</c> ends in <c>=s220</c>; the size suffix is swapped for the one needed.
+    /// </summary>
+    public async Task<Stream?> OpenThumbnailAsync(StorageItem file, int size, CancellationToken cancellationToken)
+    {
+        if (!_thumbnailById.TryGetValue(file.Path, out var link)) return null;
+        int cut = link.LastIndexOf("=s", StringComparison.Ordinal);
+        string url = (cut > 0 ? link[..cut] : link) + $"=s{Math.Clamp(size, 32, 1600)}";
+
+        string token = await _tokens.GetAccessTokenAsync(cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) return null; // expired link or no rendition: the icon stays
+        var memory = new MemoryStream();
+        await response.Content.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
+        memory.Position = 0;
+        return memory;
+    }
 
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {
@@ -511,6 +537,8 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         if (parentId is not null && parentId == _rootId) parentId = Root;
         _nodes[id] = (file.Name, parentId);
         _mimeById[id] = mime;
+        if (!folder && !string.IsNullOrEmpty(file.ThumbnailLink)) _thumbnailById[id] = file.ThumbnailLink;
+        else _thumbnailById.TryRemove(id, out _);
 
         return new StorageItem
         {

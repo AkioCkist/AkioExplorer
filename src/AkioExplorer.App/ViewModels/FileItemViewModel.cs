@@ -21,6 +21,16 @@ public sealed partial class FileItemViewModel : ObservableObject
     [ObservableProperty] private string _secondaryText;
     [ObservableProperty] private ImageSource? _icon;
     [ObservableProperty] private ImageSource? _largeIcon;
+
+    /// <summary>Picture thumbnail for grid view (photo, video frame…); null shows <see cref="LargeIcon"/>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasThumbnail))]
+    private ImageSource? _thumbnail;
+
+    public bool HasThumbnail => Thumbnail is not null;
+
+    /// <summary>Set once the thumbnail was fetched or found not to exist (see ThumbnailService).</summary>
+    public bool ThumbnailRequested { get; set; }
     [ObservableProperty] private bool _isRenaming;
     [ObservableProperty] private string _editName = string.Empty;
     [ObservableProperty] private bool _isDropTarget;
@@ -69,6 +79,11 @@ public sealed partial class FileItemViewModel : ObservableObject
     {
         if (ReferenceEquals(item, Item) || item == Item) return;
         bool iconChanged = item.Kind != Item.Kind || !string.Equals(item.Extension, Item.Extension, StringComparison.OrdinalIgnoreCase);
+        if (item.Modified != Item.Modified || item.Size != Item.Size || iconChanged)
+        {
+            ThumbnailRequested = false; // content changed: fetch a fresh thumbnail when shown
+            Thumbnail = null;
+        }
         Item = item;
         if (!IsRenaming) Name = item.Name;
         RefreshText();

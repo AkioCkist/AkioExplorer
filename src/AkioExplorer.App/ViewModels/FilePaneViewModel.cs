@@ -632,7 +632,14 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _selected.AddRange(selected);
         UpdateSelectionText();
         UpdateCommandStates();
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>Raised after <see cref="SelectedItems"/> changes (drives the preview pane).</summary>
+    public event EventHandler? SelectionChanged;
+
+    /// <summary>Localised type name ("JPEG image", "Google Docs"…), the same text as the Type column.</summary>
+    public string GetTypeName(StorageItem item) => _shell.GetTypeName(item);
 
     private void UpdateStatus()
     {

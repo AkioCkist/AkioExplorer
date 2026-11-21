@@ -17,7 +17,7 @@ namespace AkioExplorer.CloudProviders.OneDrive;
 /// OneDrive (personal and work/school) through the Microsoft Graph v1.0 REST API, path addressed
 /// ("/Documents/Report.docx"). Large folders are paged (999 items per request) and streamed to the UI.
 /// </summary>
-public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider
+public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider
 {
     public const string ServiceName = "OneDrive";
     internal const string GraphBase = "https://graph.microsoft.com/v1.0";
@@ -189,6 +189,30 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider
 
     /// <summary>"/drive/root:/A/B" form used in parentReference.path.</summary>
     internal static string GraphParentPath(string parentPath) => "/drive/root:" + Normalize(parentPath);
+
+    // ------------------------------------------------------------------ thumbnails
+
+    private static readonly HashSet<string> DocumentThumbnailExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp", ".rtf",
+    };
+
+    public bool MayHaveThumbnail(StorageItem file) =>
+        Core.Logic.PreviewClassifier.IsImageOrVideo(file) || DocumentThumbnailExtensions.Contains(file.Extension);
+
+    /// <summary>Graph renders "medium" (176 px) and "large" (800 px) thumbnails for photos, videos and Office/PDF files.</summary>
+    public async Task<Stream?> OpenThumbnailAsync(StorageItem file, int size, CancellationToken cancellationToken)
+    {
+        string path = Normalize(file.Path);
+        string rendition = size <= 176 ? "medium" : "large";
+        using var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}/thumbnails/0/{rendition}/content"),
+            authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) return null; // 404: no thumbnail for this file
+        var memory = new MemoryStream();
+        await response.Content.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
+        memory.Position = 0;
+        return memory;
+    }
 
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {

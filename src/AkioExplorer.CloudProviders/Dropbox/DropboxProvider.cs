@@ -13,7 +13,7 @@ namespace AkioExplorer.CloudProviders.Dropbox;
 /// Dropbox through the official Dropbox .NET SDK. Path addressed ("/Photos/2026"); the SDK refreshes short-lived
 /// access tokens itself from the refresh token kept in Windows Credential Manager.
 /// </summary>
-public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider
+public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider
 {
     public const string ServiceName = "Dropbox";
     private const uint PageSize = 2000;
@@ -144,6 +144,37 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider
     public override StorageCapabilities Capabilities => base.Capabilities | StorageCapabilities.ServerSideCopy;
 
     // ------------------------------------------------------------------ content
+
+    // ------------------------------------------------------------------ thumbnails
+
+    private static readonly HashSet<string> ThumbnailExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".gif", ".webp", ".ppm", ".bmp", ".heic",
+    };
+
+    /// <summary>Dropbox renders thumbnails for photos only (the formats its API lists).</summary>
+    public bool MayHaveThumbnail(StorageItem file) =>
+        file.Kind == StorageItemKind.File && ThumbnailExtensions.Contains(file.Extension) && file.Size is null or < 20L * 1024 * 1024;
+
+    public async Task<Stream?> OpenThumbnailAsync(StorageItem file, int size, CancellationToken cancellationToken)
+    {
+        string path = Normalize(file.Path);
+        var thumbnailSize = size <= 64 ? ThumbnailSize.W64h64.Instance
+            : size <= 128 ? ThumbnailSize.W128h128.Instance
+            : size <= 256 ? (ThumbnailSize)ThumbnailSize.W256h256.Instance
+            : ThumbnailSize.W640h480.Instance;
+        try
+        {
+            using var response = await Client.Files.GetThumbnailV2Async(new ThumbnailV2Arg(
+                new PathOrLink.Path(path), ThumbnailFormat.Jpeg.Instance, thumbnailSize, ThumbnailMode.FitoneBestfit.Instance)).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return new MemoryStream(await response.GetContentAsByteArrayAsync().ConfigureAwait(false));
+        }
+        catch (ApiException<ThumbnailV2Error>)
+        {
+            return null; // unsupported or corrupt image: keep the icon
+        }
+    }
 
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {

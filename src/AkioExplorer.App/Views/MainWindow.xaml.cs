@@ -69,6 +69,9 @@ public sealed partial class MainWindow : Window
         ViewModel.FocusPaneRequested += (_, pane) => FocusPane(pane);
         ViewModel.LeftPane.PropertyChanged += OnPanePropertyChanged;
         ViewModel.RightPane.PropertyChanged += OnPanePropertyChanged;
+        ViewModel.LeftPane.SelectionChanged += OnPaneSelectionChanged;
+        ViewModel.RightPane.SelectionChanged += OnPaneSelectionChanged;
+        SetUpPreviewPane();
         ViewModel.LeftPane.OpenInOtherPaneRequested += (_, location) => ViewModel.OpenInOtherPane(location);
         ViewModel.RightPane.OpenInOtherPaneRequested += (_, location) => ViewModel.OpenInOtherPane(location);
         ViewModel.Favorites.CollectionChanged += (_, _) => BuildSidebar();
@@ -186,8 +189,70 @@ public sealed partial class MainWindow : Window
             case nameof(MainViewModel.ActivePane):
                 SyncSidebarSelection();
                 UpdateWindowTitle();
+                RefreshPreview();
+                break;
+            case nameof(MainViewModel.IsPreviewOpen):
+                ApplyPreviewLayout();
                 break;
         }
+    }
+
+    // ------------------------------------------------------------------ preview pane
+
+    private const double MinListWidth = 320;
+
+    private void SetUpPreviewPane()
+    {
+        PreviewSplitter.GetWidth = () => PreviewColumn.Width.Value;
+        PreviewSplitter.SetWidth = width => PreviewColumn.Width = new GridLength(width);
+        PreviewSplitter.MaxTargetWidth = () => Math.Max(PreviewSplitter.MinTargetWidth, PanesGrid.ActualWidth - MinListWidth - PreviewSplitter.Width);
+        PreviewSplitter.Committed += (_, _) => ViewModel.PreviewWidth = Math.Round(PreviewColumn.Width.Value);
+        PanesGrid.SizeChanged += (_, _) => ClampPreviewWidth();
+        ApplyPreviewLayout();
+    }
+
+    private void ApplyPreviewLayout()
+    {
+        bool open = ViewModel.IsPreviewOpen;
+        PreviewColumn.Width = open ? new GridLength(Math.Max(ViewModel.PreviewWidth, PreviewSplitter.MinTargetWidth)) : new GridLength(0);
+        PreviewSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        PreviewView.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open)
+        {
+            ClampPreviewWidth();
+            RefreshPreview(force: true);
+        }
+        else
+        {
+            PreviewView.Clear();
+        }
+    }
+
+    /// <summary>Keeps the file list usable when the window shrinks; the saved width comes back when it grows.</summary>
+    private void ClampPreviewWidth()
+    {
+        if (!ViewModel.IsPreviewOpen || PanesGrid.ActualWidth <= 0) return;
+        double max = PreviewSplitter.MaxTargetWidth();
+        double wanted = Math.Max(ViewModel.PreviewWidth, PreviewSplitter.MinTargetWidth);
+        double width = Math.Min(wanted, max);
+        if (Math.Abs(PreviewColumn.Width.Value - width) > 0.5) PreviewColumn.Width = new GridLength(width);
+    }
+
+    private void OnPaneSelectionChanged(object? sender, EventArgs e)
+    {
+        if (sender == ViewModel.ActivePane) RefreshPreview();
+    }
+
+    private void RefreshPreview(bool force = false)
+    {
+        if (ViewModel.IsPreviewOpen) PreviewView.Show(ViewModel.ActivePane, force);
+    }
+
+    private void OnPreviewAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        a.Handled = true;
+        ShowExplorer();
+        ViewModel.IsPreviewOpen = !ViewModel.IsPreviewOpen;
     }
 
     private void ApplyDualPaneLayout()

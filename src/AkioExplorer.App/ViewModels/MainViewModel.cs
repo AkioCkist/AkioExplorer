@@ -122,6 +122,29 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Preview pane (Alt+P, File Explorer's shortcut). Remembered across sessions.</summary>
+    public bool IsPreviewOpen
+    {
+        get => _settings.Current.ShowPreviewPane;
+        set
+        {
+            if (_settings.Current.ShowPreviewPane == value) return;
+            _settings.Current.ShowPreviewPane = value;
+            _settings.Save();
+            OnPropertyChanged();
+        }
+    }
+
+    public double PreviewWidth
+    {
+        get => _settings.Current.PreviewPaneWidth;
+        set
+        {
+            _settings.Current.PreviewPaneWidth = value;
+            _settings.Save();
+        }
+    }
+
     [RelayCommand]
     private void ToggleDualPane()
     {

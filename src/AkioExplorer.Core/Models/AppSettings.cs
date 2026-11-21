@@ -46,6 +46,10 @@ public sealed class AppSettings
     public AppTheme Theme { get; set; } = AppTheme.System;
     public FileViewMode DefaultViewMode { get; set; } = FileViewMode.Details;
     public bool DualPaneOnStartup { get; set; }
+
+    /// <summary>Preview pane (Alt+P) open, and its width in DIPs.</summary>
+    public bool ShowPreviewPane { get; set; }
+    public double PreviewPaneWidth { get; set; } = 360;
     public bool ShowHiddenItems { get; set; }
     public bool RestoreLastLocations { get; set; } = true;
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;

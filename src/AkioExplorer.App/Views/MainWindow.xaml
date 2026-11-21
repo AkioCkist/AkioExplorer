@@ -35,6 +35,7 @@
             <KeyboardAccelerator Key="F6" Invoked="OnSwitchPaneAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Shift" Key="N" Invoked="OnNewFolderAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Shift" Key="D" Invoked="OnDualPaneAccelerator" />
+            <KeyboardAccelerator Modifiers="Menu" Key="P" Invoked="OnPreviewAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Shift" Key="C" Invoked="OnCopyPathAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Shift" Key="Number6" Invoked="OnDetailsAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Shift" Key="Number2" Invoked="OnGridAccelerator" />
@@ -192,6 +193,10 @@
                                             ToolTipService.ToolTip="Dual pane (Ctrl+Shift+D) · F6 switches pane">
                             <AppBarToggleButton.Icon><FontIcon Glyph="&#xE8A4;" /></AppBarToggleButton.Icon>
                         </AppBarToggleButton>
+                        <AppBarToggleButton x:Name="PreviewToggle" Label="Preview" IsChecked="{x:Bind ViewModel.IsPreviewOpen, Mode=TwoWay}"
+                                            ToolTipService.ToolTip="Preview pane (Alt+P)">
+                            <AppBarToggleButton.Icon><FontIcon Glyph="&#xE89F;" /></AppBarToggleButton.Icon>
+                        </AppBarToggleButton>
                     </CommandBar>
 
                     <Grid x:Name="PanesGrid" Grid.Row="1">
@@ -199,11 +204,15 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition x:Name="RightColumn" Width="0" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition x:Name="PreviewColumn" Width="0" />
                         </Grid.ColumnDefinitions>
                         <controls:FilePane x:Name="LeftPaneView" ViewModel="{x:Bind ViewModel.LeftPane}" />
                         <Rectangle x:Name="PaneDivider" Grid.Column="1" Width="1" Visibility="Collapsed"
                                    Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
                         <controls:FilePane x:Name="RightPaneView" Grid.Column="2" Visibility="Collapsed" ViewModel="{x:Bind ViewModel.RightPane}" />
+                        <controls:PaneSplitter x:Name="PreviewSplitter" Grid.Column="3" Visibility="Collapsed" />
+                        <controls:PreviewPane x:Name="PreviewView" Grid.Column="4" Visibility="Collapsed" />
                     </Grid>
 
                     <!-- Running copy / move operations (only operations longer than ~0.6 s appear) -->
