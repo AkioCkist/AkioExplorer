@@ -454,12 +454,13 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
 
     // ---------------------------------------------------------------- search
 
-    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        query = query.Trim();
-        if (query.Length == 0) yield break;
+        if (!query.HasCriteria) yield break;
 
-        bool wildcard = query.IndexOfAny(['*', '?']) >= 0;
+        var matcher = query.CreateMatcher(DateTimeOffset.Now);
+        string name = query.NameText;
+        bool wildcard = query.HasWildcards;
         var roots = IsRoot(path)
             ? DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed).Select(d => d.Name).ToArray()
             : [path];
@@ -481,9 +482,12 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
                 {
                     var enumerable = new FileSystemEnumerable<StorageItem>(root, static (ref FileSystemEntry e) => ToItem(ref e), options)
                     {
-                        ShouldIncludePredicate = (ref FileSystemEntry e) => wildcard
-                            ? FileSystemName.MatchesSimpleExpression(query, e.FileName, ignoreCase: true)
-                            : e.FileName.Contains(query, StringComparison.OrdinalIgnoreCase),
+                        // Cheap span check on the name first; the full matcher (type, date, size) only for candidates.
+                        ShouldIncludePredicate = (ref FileSystemEntry e) =>
+                            (name.Length == 0 || (wildcard
+                                ? FileSystemName.MatchesSimpleExpression(name, e.FileName, ignoreCase: true)
+                                : e.FileName.Contains(name, StringComparison.OrdinalIgnoreCase))) &&
+                            matcher.Matches(e.FileName.ToString(), e.IsDirectory, e.IsDirectory ? null : e.Length, e.LastWriteTimeUtc),
                         ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
                     };
 

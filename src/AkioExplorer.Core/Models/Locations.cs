@@ -33,6 +33,21 @@ public enum StorageCapabilities
 
     /// <summary>The root is a virtual listing (e.g. This PC) that can't hold files.</summary>
     VirtualRoot = 256,
+
+    /// <summary>Search can look inside files (<see cref="SearchQuery.Content"/>, "Has the words").</summary>
+    ContentSearch = 512,
+
+    /// <summary>Search filters by owner, "shared with" and "shared with me".</summary>
+    SearchSharing = 1024,
+
+    /// <summary>Search can look in the trash.</summary>
+    SearchTrash = 2048,
+
+    /// <summary>Search can return only starred items.</summary>
+    SearchStarred = 4096,
+
+    /// <summary>Search always covers the whole account (the folder can't narrow it), e.g. Google Drive.</summary>
+    AccountWideSearch = 8192,
 }
 
 public enum SortField

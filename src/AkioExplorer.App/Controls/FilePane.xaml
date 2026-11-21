@@ -125,7 +125,8 @@
                    Opacity="{x:Bind conv:XamlHelpers.ActiveIndicatorOpacity(ViewModel.ShowActiveIndicator, ViewModel.IsActive), Mode=OneWay}" />
 
         <!-- Navigation bar: history buttons, breadcrumb / address box, filter -->
-        <Grid Grid.Row="0" Padding="{StaticResource PaneBarPadding}" ColumnSpacing="8">
+        <StackPanel Grid.Row="0">
+        <Grid Padding="{StaticResource PaneBarPadding}" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -165,9 +166,47 @@
                             PlaceholderText="{x:Bind ViewModel.FilterPlaceholder, Mode=OneWay}"
                             Text="{x:Bind ViewModel.FilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                             QueryIcon="Find" QuerySubmitted="OnFilterSubmitted" KeyDown="OnFilterKeyDown"
+                            GotFocus="OnFilterGotFocus" LostFocus="OnSearchAreaLostFocus"
+                            TextChanged="OnFilterTextChanged" SuggestionChosen="OnRecentSearchChosen" UpdateTextOnSelect="True"
                             ToolTipService.ToolTip="Type to filter this folder. Press Enter to search subfolders too. (Ctrl+F)"
-                            AutomationProperties.Name="Filter and search" />
+                            AutomationProperties.Name="Filter and search">
+                <AutoSuggestBox.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE81C;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DataTemplate>
+                </AutoSuggestBox.ItemTemplate>
+            </AutoSuggestBox>
         </Grid>
+
+        <!-- Search filters (Google Drive style): shown while searching, when a filter is set, or when the search box has focus. -->
+        <ScrollViewer x:Name="SearchChipsHost" Visibility="Collapsed" HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Auto"
+                      VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled" Margin="8,0,8,6">
+            <StackPanel x:Name="SearchChips" Orientation="Horizontal" Spacing="6" GettingFocus="OnChipsGettingFocus" LostFocus="OnSearchAreaLostFocus">
+                <DropDownButton x:Name="TypeChip" Height="28" Padding="10,0,8,0" AutomationProperties.Name="Type filter"
+                                ToolTipService.ToolTip="Show only one kind of item" />
+                <DropDownButton x:Name="PeopleChip" Height="28" Padding="10,0,8,0" AutomationProperties.Name="People filter"
+                                ToolTipService.ToolTip="Filter by owner" />
+                <DropDownButton x:Name="ModifiedChip" Height="28" Padding="10,0,8,0" AutomationProperties.Name="Date modified filter"
+                                ToolTipService.ToolTip="Show only items changed in this period" />
+                <DropDownButton x:Name="SizeChip" Height="28" Padding="10,0,8,0" AutomationProperties.Name="Size filter"
+                                ToolTipService.ToolTip="Show only files of this size" />
+                <DropDownButton x:Name="ScopeChip" Height="28" Padding="10,0,8,0" AutomationProperties.Name="Search location"
+                                ToolTipService.ToolTip="Where to search" />
+                <Button x:Name="AdvancedSearchButton" Height="28" Padding="10,0" Click="OnAdvancedSearchClick"
+                        ToolTipService.ToolTip="All search options in one place (Ctrl+Shift+F)" AutomationProperties.Name="Advanced search">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE71C;" FontSize="12" />
+                        <TextBlock Text="Advanced search" />
+                    </StackPanel>
+                </Button>
+                <HyperlinkButton x:Name="ClearFiltersButton" Height="28" Padding="8,0" Content="Clear filters" Click="OnClearFiltersClick"
+                                 Visibility="Collapsed" ToolTipService.ToolTip="Remove all search filters (Esc)" />
+            </StackPanel>
+        </ScrollViewer>
+        </StackPanel>
 
         <InfoBar Grid.Row="1" Margin="8,0,8,6" IsClosable="True"
                  Severity="{x:Bind conv:XamlHelpers.Severity(ViewModel.IsMessageError), Mode=OneWay}"

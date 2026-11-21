@@ -30,6 +30,7 @@
             <KeyboardAccelerator Modifiers="Menu" Key="D" Invoked="OnAddressAccelerator" />
             <KeyboardAccelerator Key="F4" Invoked="OnAddressAccelerator" />
             <KeyboardAccelerator Modifiers="Control" Key="F" Invoked="OnFilterAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="F" Invoked="OnAdvancedSearchAccelerator" />
             <KeyboardAccelerator Modifiers="Control" Key="E" Invoked="OnFilterAccelerator" />
             <KeyboardAccelerator Key="F3" Invoked="OnFilterAccelerator" />
             <KeyboardAccelerator Key="F6" Invoked="OnSwitchPaneAccelerator" />

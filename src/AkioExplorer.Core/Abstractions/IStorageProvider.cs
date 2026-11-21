@@ -29,8 +29,12 @@ public interface IStorageProvider
 
     Task DeleteAsync(IReadOnlyList<string> paths, bool permanent, CancellationToken cancellationToken);
 
-    /// <summary>Recursive name search under <paramref name="path"/>. Results stream in as they are found.</summary>
-    IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, CancellationToken cancellationToken);
+    /// <summary>
+    /// Recursive search under <paramref name="path"/>. Results stream in as they are found and all match the query:
+    /// providers push what they can to their server and check the rest with <see cref="SearchQuery.CreateMatcher"/>.
+    /// <see cref="SearchQuery.Content"/> is ignored unless the provider has <see cref="StorageCapabilities.ContentSearch"/>.
+    /// </summary>
+    IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, CancellationToken cancellationToken);
 
     IReadOnlyList<BreadcrumbSegment> GetBreadcrumb(string path);
 

@@ -65,6 +65,9 @@ public sealed class AppSettings
     /// <summary>Where "Download" saves files; empty = the Windows Downloads folder.</summary>
     public string DownloadFolder { get; set; } = string.Empty;
     public List<FavoriteEntry> Favorites { get; set; } = new();
+
+    /// <summary>Search terms, newest first (shown under the search box).</summary>
+    public List<string> RecentSearches { get; set; } = new();
     public List<CloudAccount> CloudAccounts { get; set; } = new();
     public PaneState LeftPane { get; set; } = new();
     public PaneState RightPane { get; set; } = new();

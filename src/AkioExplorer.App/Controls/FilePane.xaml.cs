@@ -42,6 +42,7 @@ public sealed partial class FilePane : UserControl
     public FilePane()
     {
         InitializeComponent();
+        BuildSearchChips();
         Root.AddHandler(PointerPressedEvent, new PointerEventHandler(OnRootPointerPressed), handledEventsToo: true);
         Root.GotFocus += (_, _) => ViewModel?.RequestActivation();
         SizeChanged += (_, e) =>
@@ -69,6 +70,7 @@ public sealed partial class FilePane : UserControl
             old.FocusListRequested -= pane.OnFocusListRequested;
             old.AddressEditRequested -= pane.OnAddressEditRequested;
             old.FilterFocusRequested -= pane.OnFilterFocusRequested;
+            old.AdvancedSearchRequested -= pane.OnAdvancedSearchRequested;
             old.PropertyChanged -= pane.OnViewModelPropertyChanged;
         }
 
@@ -79,15 +81,21 @@ public sealed partial class FilePane : UserControl
             vm.FocusListRequested += pane.OnFocusListRequested;
             vm.AddressEditRequested += pane.OnAddressEditRequested;
             vm.FilterFocusRequested += pane.OnFilterFocusRequested;
+            vm.AdvancedSearchRequested += pane.OnAdvancedSearchRequested;
             vm.PropertyChanged += pane.OnViewModelPropertyChanged;
         }
 
         pane.Bindings.Update();
         pane.SyncViewToggles();
+        pane.UpdateSearchChips();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(FilePaneViewModel.SearchFilters) or nameof(FilePaneViewModel.IsSearchMode)
+            or nameof(FilePaneViewModel.FilterText) or nameof(FilePaneViewModel.CanSearch) or nameof(FilePaneViewModel.SearchFolderName))
+            UpdateSearchChips();
+
         if (e.PropertyName == nameof(FilePaneViewModel.ViewMode))
         {
             SyncViewToggles();
@@ -724,6 +732,8 @@ public sealed partial class FilePane : UserControl
 
     private async void OnFilterSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
+        sender.IsSuggestionListOpen = false;
+        if (args.ChosenSuggestion is string recent && recent != ViewModel.FilterText) ViewModel.FilterText = recent;
         await ViewModel.StartSearchAsync();
     }
 
@@ -733,17 +743,20 @@ public sealed partial class FilePane : UserControl
         {
             case VirtualKey.Escape:
                 e.Handled = true;
-                if (ViewModel.FilterText.Length > 0 || ViewModel.IsSearchMode)
+                if (FilterBox.IsSuggestionListOpen)
                 {
-                    ViewModel.FilterText = string.Empty;
-                    ViewModel.ExitSearch();
+                    FilterBox.IsSuggestionListOpen = false;
+                }
+                else if (ViewModel.FilterText.Length > 0 || ViewModel.IsSearchMode || ViewModel.HasSearchFilters)
+                {
+                    ViewModel.ClearSearch();
                 }
                 else
                 {
                     FocusList();
                 }
                 break;
-            case VirtualKey.Down:
+            case VirtualKey.Down when !FilterBox.IsSuggestionListOpen:
                 // Keep hands on the keyboard: arrow down moves from the search box into the results.
                 e.Handled = true;
                 if (ViewModel.Items.Count > 0 && ActiveList?.SelectedItem is null)

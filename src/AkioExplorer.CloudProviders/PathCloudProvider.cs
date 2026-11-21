@@ -40,7 +40,7 @@ public abstract class PathCloudProvider : ICloudStorageProvider
 
     public abstract Task DeleteAsync(IReadOnlyList<string> paths, bool permanent, CancellationToken cancellationToken);
 
-    public abstract IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, CancellationToken cancellationToken);
+    public abstract IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, CancellationToken cancellationToken);
 
     public abstract Task<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken);
 

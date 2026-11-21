@@ -675,6 +675,8 @@ public sealed partial class MainWindow : Window
 
     private void OnFilterAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.RequestFilterFocus());
 
+    private void OnAdvancedSearchAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.RequestAdvancedSearch());
+
     private void OnNewFolderAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.NewFolderCommand.Execute(null));
 
     private void OnCopyPathAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.CopyPathCommand.Execute(null));

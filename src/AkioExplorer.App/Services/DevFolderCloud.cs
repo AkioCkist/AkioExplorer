@@ -77,11 +77,16 @@ internal sealed class DevFolderCloud : PathCloudProvider, IFileContentProvider
         return Task.CompletedTask;
     }
 
-    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken ct)
+    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken ct)
     {
         await Task.Yield();
-        foreach (var f in new DirectoryInfo(Local(path)).EnumerateFileSystemInfos($"*{query}*", SearchOption.AllDirectories))
-            yield return ToItem(f, "/" + Path.GetRelativePath(_root, f.FullName).Replace('\\', '/'));
+        if (!query.HasCriteria) yield break;
+        var matcher = query.CreateMatcher(DateTimeOffset.Now);
+        foreach (var f in new DirectoryInfo(Local(path)).EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+        {
+            var item = ToItem(f, "/" + Path.GetRelativePath(_root, f.FullName).Replace('\\', '/'));
+            if (matcher.Matches(item)) yield return item;
+        }
     }
 
     public override Task<StorageQuota?> GetQuotaAsync(CancellationToken ct) => Task.FromResult<StorageQuota?>(new StorageQuota(1L << 30, 15L << 30));

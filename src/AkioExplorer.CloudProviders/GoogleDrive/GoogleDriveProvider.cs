@@ -72,7 +72,9 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
 
     public StorageCapabilities Capabilities =>
         StorageCapabilities.CreateFolder | StorageCapabilities.Rename | StorageCapabilities.Delete |
-        StorageCapabilities.RecycleBin | StorageCapabilities.Search | StorageCapabilities.ServerSideCopy;
+        StorageCapabilities.RecycleBin | StorageCapabilities.Search | StorageCapabilities.ServerSideCopy |
+        StorageCapabilities.ContentSearch | StorageCapabilities.SearchSharing | StorageCapabilities.SearchTrash |
+        StorageCapabilities.SearchStarred | StorageCapabilities.AccountWideSearch;
 
     public string RootPath => Root;
 
@@ -194,17 +196,25 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
 
     // ------------------------------------------------------------------ search & quota
 
-    /// <summary>Drive's query API can't limit a search to a subtree, so results cover the whole drive.</summary>
-    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken cancellationToken)
+    /// <summary>
+    /// Drive's query API can't limit a search to a subtree, so results cover the whole drive. Name, words, type and
+    /// date go into the server query; size (not queryable) and wildcards are filtered here.
+    /// </summary>
+    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        query = query.Trim();
-        if (query.Length == 0) yield break;
+        if (!query.HasCriteria) yield break;
+        var matcher = query.CreateMatcher(DateTimeOffset.Now);
+        string q = BuildQuery(query, matcher);
+
+        // The server's MIME match is authoritative (a Google Doc or an extensionless upload has no telling name),
+        // so the local check only covers what the query couldn't express.
+        if (MimeQuery(query.Category) is not null) matcher = (query with { Category = FileCategory.Any }).CreateMatcher(DateTimeOffset.Now);
 
         string? pageToken = null;
         do
         {
             var request = _drive.Files.List();
-            request.Q = $"name contains '{Escape(query)}' and trashed = false";
+            request.Q = q;
             request.Fields = $"nextPageToken, files({FileFields})";
             request.PageSize = 200;
             request.Spaces = "drive";
@@ -214,10 +224,56 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
 
             var files = result.Files ?? [];
             await LearnParentsAsync(files.SelectMany(f => f.Parents ?? []), cancellationToken).ConfigureAwait(false);
-            foreach (var file in files) yield return ToItem(file, file.Parents?.FirstOrDefault());
+            foreach (var file in files)
+            {
+                var item = ToItem(file, file.Parents?.FirstOrDefault());
+                if (matcher.Matches(item)) yield return item;
+            }
         }
         while (pageToken is not null);
     }
+
+    internal static string BuildQuery(SearchQuery query, SearchMatcher matcher)
+    {
+        var terms = new List<string> { query.InTrash ? "trashed = true" : "trashed = false" };
+        if (query.Starred) terms.Add("starred = true");
+        if (query.Scope == SearchScope.SharedWithMe) terms.Add("sharedWithMe = true");
+        switch (query.EffectiveOwner)
+        {
+            case OwnerFilter.Me: terms.Add("'me' in owners"); break;
+            case OwnerFilter.NotMe: terms.Add("not 'me' in owners"); break;
+            case OwnerFilter.Person: terms.Add($"'{Escape(query.OwnerEmailText)}' in owners"); break;
+        }
+        if (query.SharedWithText.Length > 0)
+        {
+            string who = Escape(query.SharedWithText);
+            terms.Add($"('{who}' in readers or '{who}' in writers)");
+        }
+        if (query.NameText.Length > 0 && !query.HasWildcards) terms.Add($"name contains '{Escape(query.NameText)}'");
+        if (query.ContentText.Length > 0) terms.Add($"fullText contains '{Escape(query.ContentText)}'");
+        if (MimeQuery(query.Category) is { } mime) terms.Add(mime);
+        if (matcher.ModifiedAfter is { } after) terms.Add($"modifiedTime >= '{after.UtcDateTime:yyyy-MM-ddTHH:mm:ss}'");
+        if (matcher.ModifiedBefore is { } before) terms.Add($"modifiedTime < '{before.UtcDateTime:yyyy-MM-ddTHH:mm:ss}'");
+        return string.Join(" and ", terms);
+    }
+
+    /// <summary>Server-side type filter. Categories with no clean MIME family return null and are filtered by extension.</summary>
+    private static string? MimeQuery(FileCategory category) => category switch
+    {
+        FileCategory.Folder => $"mimeType = '{FolderMime}'",
+        FileCategory.Image => "(mimeType contains 'image/' or mimeType = 'application/vnd.google-apps.drawing')",
+        FileCategory.Video => "mimeType contains 'video/'",
+        FileCategory.Audio => "mimeType contains 'audio/'",
+        FileCategory.Pdf => "mimeType = 'application/pdf'",
+        FileCategory.Document => "(mimeType = 'application/vnd.google-apps.document' or mimeType contains 'wordprocessingml' or " +
+            "mimeType = 'application/msword' or mimeType = 'application/vnd.oasis.opendocument.text' or mimeType = 'application/rtf' or " +
+            "mimeType = 'text/plain' or mimeType = 'text/markdown')",
+        FileCategory.Spreadsheet => "(mimeType = 'application/vnd.google-apps.spreadsheet' or mimeType contains 'spreadsheetml' or " +
+            "mimeType = 'application/vnd.ms-excel' or mimeType = 'application/vnd.oasis.opendocument.spreadsheet' or mimeType = 'text/csv')",
+        FileCategory.Presentation => "(mimeType = 'application/vnd.google-apps.presentation' or mimeType contains 'presentationml' or " +
+            "mimeType = 'application/vnd.ms-powerpoint' or mimeType = 'application/vnd.oasis.opendocument.presentation')",
+        _ => null,
+    };
 
     public async Task<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken)
     {

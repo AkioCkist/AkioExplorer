@@ -60,7 +60,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private IDisposable? _watcher;
     private int _loadVersion;
     private bool _suppressFilter;
-    private string _searchQuery = string.Empty;
+    private SearchQuery _activeQuery = SearchQuery.Empty;
+    private SearchMatcher? _viewMatcher;
+    private const int MaxRecentSearches = 10;
 
     public FilePaneViewModel(
         IStorageProviderRegistry registry,
@@ -133,6 +135,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _foldersFirst = true;
     [ObservableProperty] private bool _isSearchMode;
     [ObservableProperty] private bool _isSearching;
+
+    /// <summary>Search filters (type, date, size, words, scope) without the name, which lives in <see cref="FilterText"/>.</summary>
+    [ObservableProperty] private SearchQuery _searchFilters = SearchQuery.Empty;
     [ObservableProperty] private string _statusText = string.Empty;
     [ObservableProperty] private string _selectionText = string.Empty;
     [ObservableProperty] private bool _isEmpty;
@@ -149,6 +154,49 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         : $"Search {Provider.GetDisplayName(Location.Path)}";
 
     public bool IsFavorite => Location is not null && _favorites.Contains(Location);
+
+    public bool HasSearchFilters => SearchFilters.HasFilters;
+
+    /// <summary>"Has the words" works here (the provider searches inside files).</summary>
+    public bool SupportsContentSearch => Supports(StorageCapabilities.ContentSearch);
+
+    public bool CanSearch => Supports(StorageCapabilities.Search);
+
+    /// <summary>Name of the folder a "this folder" search covers, and of the whole provider ("Everywhere").</summary>
+    public string SearchFolderName => Provider is null || Location is null ? string.Empty : Provider.GetDisplayName(Location.Path);
+
+    public string SearchProviderName => Provider?.DisplayName ?? string.Empty;
+
+    public bool SupportsSharingSearch => Supports(StorageCapabilities.SearchSharing);
+
+    public bool SupportsTrashSearch => Supports(StorageCapabilities.SearchTrash);
+
+    public bool SupportsStarredSearch => Supports(StorageCapabilities.SearchStarred);
+
+    /// <summary>Where a search can look, for the Location chip and the advanced form. The first entry is the default.</summary>
+    public IReadOnlyList<(string Label, SearchScope Scope)> SearchScopeOptions
+    {
+        get
+        {
+            var options = new List<(string, SearchScope)>();
+            if (Provider is null || Location is null) return options;
+            bool whole = Supports(StorageCapabilities.AccountWideSearch) || Location.Path == Provider.RootPath;
+            if (whole)
+            {
+                options.Add(($"Anywhere in {SearchProviderName}", SearchScope.CurrentFolder));
+            }
+            else
+            {
+                options.Add(($"{SearchFolderName} and subfolders", SearchScope.CurrentFolder));
+                options.Add(($"Everywhere in {SearchProviderName}", SearchScope.Everywhere));
+            }
+            if (SupportsSharingSearch) options.Add(("Shared with me", SearchScope.SharedWithMe));
+            return options;
+        }
+    }
+
+    /// <summary>The search box text plus the filters: what Enter would search for.</summary>
+    public SearchQuery CurrentQuery => SearchFilters with { Name = FilterText };
 
     /// <summary>Raised when the user interacts with the pane, so the shell can make it the active pane.</summary>
     public event EventHandler? ActivationRequested;
@@ -212,6 +260,11 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     public void RequestAddressEdit() => AddressEditRequested?.Invoke(this, EventArgs.Empty);
 
     public void RequestFilterFocus() => FilterFocusRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Opens the advanced search form for this pane (Ctrl+Shift+F).</summary>
+    public void RequestAdvancedSearch() => AdvancedSearchRequested?.Invoke(this, EventArgs.Empty);
+
+    public event EventHandler? AdvancedSearchRequested;
 
     public void RequestListFocus() => FocusListRequested?.Invoke(this, EventArgs.Empty);
 
@@ -351,6 +404,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             _suppressFilter = true;
             FilterText = string.Empty;
+            SearchFilters = SearchQuery.Empty;
             _suppressFilter = false;
             _selected.Clear();
 
@@ -364,6 +418,11 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         Title = provider.GetDisplayName(target.Path);
         OnPropertyChanged(nameof(FilterPlaceholder));
         OnPropertyChanged(nameof(IsFavorite));
+        OnPropertyChanged(nameof(SupportsContentSearch));
+        OnPropertyChanged(nameof(CanSearch));
+        OnPropertyChanged(nameof(SearchFolderName));
+        OnPropertyChanged(nameof(SearchProviderName));
+        OnPropertyChanged(nameof(SearchScopeOptions));
         UpdateCommandStates();
     }
 
@@ -541,6 +600,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private bool IsVisible(FileItemViewModel vm)
     {
         if (vm.Item.IsHidden && !_settings.Current.ShowHiddenItems) return false;
+        if (_viewMatcher is not null && !_viewMatcher.Matches(vm.Item)) return false;
         return FilterText.Length == 0 || vm.Name.Contains(FilterText, StringComparison.CurrentCultureIgnoreCase);
     }
 
@@ -566,6 +626,16 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
 
         UpdateStatus();
+    }
+
+    /// <summary>Type / date / size filters also narrow the folder being browsed, so the chips always mean what they show.</summary>
+    partial void OnSearchFiltersChanged(SearchQuery value)
+    {
+        var folderFilters = value with { Name = string.Empty, Content = string.Empty, Scope = SearchScope.CurrentFolder };
+        _viewMatcher = folderFilters.HasCriteria ? folderFilters.CreateMatcher(DateTimeOffset.Now) : null;
+        OnPropertyChanged(nameof(HasSearchFilters));
+        if (_suppressFilter) return;
+        if (!IsSearchMode) ApplyView(replace: false);
     }
 
     partial void OnFilterTextChanged(string value)
@@ -650,17 +720,20 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             StatusText = IsSearching ? $"Searching… {Items.Count:N0} found" : $"{Items.Count:N0} results";
             IsEmpty = Items.Count == 0 && !IsSearching;
-            EmptyText = $"No results for \"{_searchQuery}\"";
+            EmptyText = _activeQuery.HasFilters
+                ? "No results. Try removing a filter or searching everywhere."
+                : $"No results for \"{_activeQuery.NameText}\"";
         }
         else
         {
             int total = _settings.Current.ShowHiddenItems ? _all.Count : _all.Count(v => !v.Item.IsHidden);
-            StatusText = FilterText.Length > 0
+            bool narrowed = FilterText.Length > 0 || _viewMatcher is not null;
+            StatusText = narrowed
                 ? $"{Items.Count:N0} of {total:N0} items"
                 : $"{Items.Count:N0} {(Items.Count == 1 ? "item" : "items")}";
             IsEmpty = Items.Count == 0 && !IsLoading && Location is not null;
-            EmptyText = FilterText.Length > 0
-                ? $"No items match \"{FilterText}\". Press Enter to search subfolders."
+            EmptyText = FilterText.Length > 0 ? $"No items match \"{FilterText}\". Press Enter to search subfolders."
+                : _viewMatcher is not null ? "Nothing here matches the filters. Press Enter in the search box to search subfolders."
                 : "This folder is empty";
         }
         UpdateSelectionText();
@@ -1052,10 +1125,40 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     // ------------------------------------------------------------------ search
 
     [RelayCommand]
-    public async Task StartSearchAsync()
+    public Task StartSearchAsync() => SearchAsync(CurrentQuery);
+
+    /// <summary>Applies new filters (chips, advanced search) and searches right away, like Google Drive.</summary>
+    public async Task ApplySearchAsync(SearchQuery query)
     {
-        string query = (IsSearchMode ? _searchQuery : FilterText).Trim();
-        if (query.Length == 0 || Provider is null || Location is null) return;
+        _suppressFilter = true;
+        FilterText = query.Name;
+        _suppressFilter = false;
+        SearchFilters = query with { Name = string.Empty };
+
+        if (CurrentQuery.HasCriteria)
+            await SearchAsync(CurrentQuery);
+        else if (IsSearchMode)
+            ExitSearch();
+        else
+            ApplyView(replace: false);
+    }
+
+    /// <summary>Clears the search box and all filters, back to the plain folder.</summary>
+    public void ClearSearch()
+    {
+        _suppressFilter = true;
+        FilterText = string.Empty;
+        SearchFilters = SearchQuery.Empty;
+        _suppressFilter = false;
+        if (IsSearchMode) ExitSearch();
+        else ApplyView(replace: false);
+    }
+
+    private async Task SearchAsync(SearchQuery query)
+    {
+        if (Provider is null || Location is null) return;
+        query = query.RestrictTo(Provider.Capabilities);
+        if (!query.HasCriteria) return;
         if (!Supports(StorageCapabilities.Search))
         {
             ShowError("Search isn't available for this location.");
@@ -1065,12 +1168,13 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _searchCts?.Cancel();
         var cts = _searchCts = new CancellationTokenSource();
         var provider = Provider;
-        string root = Location.Path;
+        string root = query.Scope == SearchScope.Everywhere ? provider.RootPath : Location.Path;
 
-        _searchQuery = query;
+        _activeQuery = query;
+        RememberSearch(query.NameText);
         IsSearchMode = true;
         IsSearching = true;
-        Title = $"Search results for \"{query}\"";
+        Title = SearchLabels.Describe(query, DateTime.Today);
         _selected.Clear();
         Items.ReplaceAll(Array.Empty<FileItemViewModel>());
         UpdateStatus();
@@ -1082,6 +1186,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             await foreach (var item in provider.SearchAsync(root, query, cts.Token))
             {
+                if (item.IsHidden && !_settings.Current.ShowHiddenItems) continue;
                 buffer.Add(new FileItemViewModel(item, _icons, RelativeFolder(provider, root, item.Path), Columns));
                 if (buffer.Count >= 250 || clock.ElapsedMilliseconds > 120)
                 {
@@ -1109,6 +1214,37 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
                 UpdateStatus();
             }
         }
+    }
+
+    // ------------------------------------------------------------------ recent searches
+
+    /// <summary>Recent search terms (newest first) containing <paramref name="text"/>; prefix matches first.</summary>
+    public IReadOnlyList<string> RecentSearches(string text)
+    {
+        text = text.Trim();
+        var all = _settings.Current.RecentSearches;
+        if (text.Length == 0) return all.Take(8).ToList();
+        return all
+            .Where(s => s.Contains(text, StringComparison.CurrentCultureIgnoreCase) && !s.Equals(text, StringComparison.CurrentCultureIgnoreCase))
+            .OrderByDescending(s => s.StartsWith(text, StringComparison.CurrentCultureIgnoreCase))
+            .Take(8)
+            .ToList();
+    }
+
+    private void RememberSearch(string text)
+    {
+        if (text.Length == 0) return;
+        var list = _settings.Current.RecentSearches;
+        list.RemoveAll(s => s.Equals(text, StringComparison.CurrentCultureIgnoreCase));
+        list.Insert(0, text);
+        if (list.Count > MaxRecentSearches) list.RemoveRange(MaxRecentSearches, list.Count - MaxRecentSearches);
+        _settings.Save();
+    }
+
+    public void ForgetRecentSearch(string text)
+    {
+        _settings.Current.RecentSearches.RemoveAll(s => s.Equals(text, StringComparison.CurrentCultureIgnoreCase));
+        _settings.Save();
     }
 
     /// <summary>"Sub A\Docs" relative to the search root – shorter and more scannable than a full path.</summary>

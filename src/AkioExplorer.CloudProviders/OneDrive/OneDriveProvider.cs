@@ -9,6 +9,7 @@ using AkioExplorer.CloudProviders.Auth;
 using AkioExplorer.CloudProviders.Http;
 using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Cloud;
+using AkioExplorer.Core.Logic;
 using AkioExplorer.Core.Models;
 
 namespace AkioExplorer.CloudProviders.OneDrive;
@@ -135,13 +136,21 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
 
     // ------------------------------------------------------------------ search & quota
 
-    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         path = Normalize(path);
-        query = query.Trim();
-        if (query.Length == 0) yield break;
+        if (!query.HasCriteria) yield break;
+        var matcher = query.CreateMatcher(DateTimeOffset.Now);
 
-        string q = Uri.EscapeDataString(query.Replace("'", "''"));
+        if (query.NameText.Length == 0 || query.HasWildcards)
+        {
+            // Graph search needs a plain term: filter-only and wildcard searches walk the folders instead.
+            await foreach (var found in SearchWalker.WalkAsync(this, path, matcher, cancellationToken).ConfigureAwait(false))
+                yield return found;
+            yield break;
+        }
+
+        string q = Uri.EscapeDataString(query.NameText.Replace("'", "''"));
         string? url = $"{GraphBase}{ItemRef(path)}/search(q='{q}')?$top=200&$select={Select}";
         while (url is not null)
         {
@@ -151,7 +160,8 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             {
                 string? itemPath = await ResolvePathAsync(element, cancellationToken).ConfigureAwait(false);
                 if (itemPath is null || !IsSameOrDescendant(itemPath, path) || itemPath.Equals(path, StringComparison.OrdinalIgnoreCase)) continue;
-                yield return ToItem(element, itemPath);
+                var item = ToItem(element, itemPath);
+                if (matcher.Matches(item)) yield return item; // Graph also matches content; the name filter is ours
             }
             url = root.TryGetProperty("@odata.nextLink", out var next) ? next.GetString() : null;
         }

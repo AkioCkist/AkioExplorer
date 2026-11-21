@@ -76,7 +76,7 @@ internal sealed class MemoryCloud(string id, bool serverCopy = false, bool unkno
         return Task.CompletedTask;
     }
 
-    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken ct)
     {
         await Task.Yield();
         yield break;

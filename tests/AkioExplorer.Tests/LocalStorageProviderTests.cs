@@ -90,7 +90,7 @@ public sealed class LocalStorageProviderTests : IDisposable
     public async Task Search_is_recursive()
     {
         var results = new List<StorageItem>();
-        await foreach (var item in _provider.SearchAsync(_root, "match", CancellationToken.None)) results.Add(item);
+        await foreach (var item in _provider.SearchAsync(_root, new SearchQuery { Name = "match" }, CancellationToken.None)) results.Add(item);
         Assert.Single(results);
         Assert.Equal("deep-match.txt", results[0].Name);
     }

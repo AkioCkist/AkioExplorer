@@ -110,19 +110,42 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, I
         }
     }
 
-    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, string query, [EnumeratorCancellation] CancellationToken cancellationToken)
+    public override async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         path = Normalize(path);
-        query = query.Trim();
-        if (query.Length == 0) yield break;
+        if (!query.HasCriteria) yield break;
+        var matcher = query.CreateMatcher(DateTimeOffset.Now);
+
+        if (query.NameText.Length == 0 || query.HasWildcards)
+        {
+            // Dropbox search needs a plain term. For filter-only or wildcard searches, list the tree recursively
+            // (one paged server call, not a folder-by-folder walk) and filter here.
+            var page = await CallAsync(() => Client.Files.ListFolderAsync(new ListFolderArg(path, recursive: true, limit: PageSize)), path).ConfigureAwait(false);
+            while (true)
+            {
+                foreach (var entry in page.Entries)
+                {
+                    if (entry.IsDeleted) continue;
+                    var item = ToItem(entry);
+                    if (!item.Path.Equals(path, StringComparison.OrdinalIgnoreCase) && matcher.Matches(item)) yield return item;
+                }
+
+                if (!page.HasMore) yield break;
+                cancellationToken.ThrowIfCancellationRequested();
+                string next = page.Cursor;
+                page = await CallAsync(() => Client.Files.ListFolderContinueAsync(new ListFolderContinueArg(next)), path).ConfigureAwait(false);
+            }
+        }
 
         var options = new SearchOptions(path: path.Length == 0 ? null : path, maxResults: 200);
-        var result = await CallAsync(() => Client.Files.SearchV2Async(new SearchV2Arg(query, options)), path).ConfigureAwait(false);
+        var result = await CallAsync(() => Client.Files.SearchV2Async(new SearchV2Arg(query.NameText, options)), path).ConfigureAwait(false);
         while (true)
         {
             foreach (var match in result.Matches)
             {
-                if (match.Metadata.IsMetadata) yield return ToItem(match.Metadata.AsMetadata.Value);
+                if (!match.Metadata.IsMetadata) continue;
+                var item = ToItem(match.Metadata.AsMetadata.Value);
+                if (matcher.Matches(item)) yield return item;
             }
 
             if (!result.HasMore || result.Cursor is null) yield break;
