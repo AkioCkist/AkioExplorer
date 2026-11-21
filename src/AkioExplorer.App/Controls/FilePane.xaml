@@ -167,7 +167,11 @@
 
         <InfoBar Grid.Row="1" Margin="8,0,8,6" IsClosable="True"
                  Severity="{x:Bind conv:XamlHelpers.Severity(ViewModel.IsMessageError), Mode=OneWay}"
-                 IsOpen="{x:Bind ViewModel.IsErrorOpen, Mode=TwoWay}" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
+                 IsOpen="{x:Bind ViewModel.IsErrorOpen, Mode=TwoWay}" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}">
+            <InfoBar.ActionButton>
+                <Button Content="Reconnect" Click="OnReconnectClick" Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.CanReconnect), Mode=OneWay}" />
+            </InfoBar.ActionButton>
+        </InfoBar>
 
         <!-- Column headers (details view) -->
         <Grid x:Name="ColumnHeader" Grid.Row="2" x:Load="{x:Bind ViewModel.IsDetailsView, Mode=OneWay}" Margin="4,0,16,0" Padding="0,0,0,2"

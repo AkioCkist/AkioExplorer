@@ -56,6 +56,10 @@ public sealed class FileOperationService : IFileOperationService
         return operation;
     }
 
+    public bool CanTransfer(string sourceProviderId, string destinationProviderId) =>
+        _registry.Find(sourceProviderId) is { } src && _registry.Find(destinationProviderId) is { } dst &&
+        _executors.Any(e => e.CanTransfer(src, dst));
+
     public void Remove(FileOperation operation)
     {
         if (!operation.IsFinished) operation.Cancel();

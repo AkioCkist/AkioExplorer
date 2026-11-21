@@ -285,12 +285,20 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             if (version != _loadVersion) return;
             _logger.LogInformation("Navigation to {Path} failed: {Message}", target.Path, ex.Message);
             _cache.Invalidate(target);
-            ShowError(ex.Message);
+            ShowStorageError(ex, target.ProviderId);
 
             if (Location is null)
             {
-                // First navigation failed (e.g. remembered folder was deleted): fall back to the provider root.
-                await NavigateAsync(new StorageLocation(provider.Id, provider.RootPath));
+                // First navigation failed (remembered folder deleted, cloud sign-in expired…): fall back to the provider
+                // root, and from a failing root to This PC, so the pane is never left empty.
+                var fallback = target.Path != provider.RootPath
+                    ? new StorageLocation(provider.Id, provider.RootPath)
+                    : provider.Id != "local" ? new StorageLocation("local", string.Empty) : null;
+                if (fallback is not null)
+                {
+                    await NavigateAsync(fallback);
+                    ShowStorageError(ex, target.ProviderId);
+                }
             }
         }
         catch (Exception ex)
@@ -735,7 +743,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
         catch (StorageException ex)
         {
-            ShowError(ex.Message);
+            ShowStorageError(ex);
         }
     }
 
@@ -789,7 +797,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
         catch (StorageException ex)
         {
-            ShowError(ex.Message);
+            ShowStorageError(ex);
         }
     }
 
@@ -855,7 +863,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         catch (StorageException ex)
         {
             vm.Name = vm.Item.Name;
-            ShowError(ex.Message);
+            ShowStorageError(ex);
         }
 
         SelectionRequested?.Invoke(this, [vm]);
@@ -910,7 +918,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
         catch (StorageException ex)
         {
-            ShowError(ex.Message);
+            ShowStorageError(ex);
             _ = RefreshSilentlyAsync();
         }
         finally
@@ -989,6 +997,13 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             return null;
         }
 
+        if (!_operations.CanTransfer(sourceProviderId, Provider.Id))
+        {
+            string from = _registry.Find(sourceProviderId)?.DisplayName ?? "that location";
+            ShowError($"Copying between {from} and {Provider.DisplayName} isn't available yet. It arrives with the transfer engine (upload/download).");
+            return null;
+        }
+
         return _operations.Enqueue(kind, sourceProviderId, items, new StorageLocation(Provider.Id, target));
     }
 
@@ -1060,7 +1075,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
         catch (StorageException ex)
         {
-            ShowError(ex.Message);
+            ShowStorageError(ex);
         }
         finally
         {
@@ -1144,8 +1159,36 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     public void ShowError(string message) => ShowMessage(message, isError: true);
 
+    [ObservableProperty] private bool _canReconnect;
+
+    /// <summary>Raised when a cloud account's sign-in expired; the shell offers to reconnect it.</summary>
+    public event EventHandler<string>? ReconnectRequested;
+
+    public event EventHandler<string>? AuthenticationExpired;
+
+    private string? _errorProviderId;
+
+    public void RequestReconnect()
+    {
+        if (_errorProviderId is not null) ReconnectRequested?.Invoke(this, _errorProviderId);
+    }
+
+    /// <param name="providerId">The provider that failed (defaults to the current one; navigation errors pass the target).</param>
+    public void ShowStorageError(StorageException ex, string? providerId = null)
+    {
+        ShowMessage(ex.Message, isError: true);
+        _errorProviderId = providerId ?? Provider?.Id;
+        CanReconnect = ex.Kind == StorageErrorKind.AuthenticationRequired && _errorProviderId is not null;
+        if (CanReconnect) AuthenticationExpired?.Invoke(this, _errorProviderId!);
+    }
+
+    /// <summary>True when items from <paramref name="sourceProviderId"/> can be copied into this pane.</summary>
+    public bool CanAcceptFrom(string sourceProviderId) =>
+        Provider is not null && _operations.CanTransfer(sourceProviderId, Provider.Id);
+
     public void ShowMessage(string message, bool isError)
     {
+        CanReconnect = false;
         IsMessageError = isError;
         ErrorMessage = message;
         IsErrorOpen = true;

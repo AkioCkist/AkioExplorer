@@ -1,7 +1,14 @@
 using AkioExplorer.App.Services;
 using AkioExplorer.App.ViewModels;
 using AkioExplorer.App.Views;
+using AkioExplorer.CloudProviders;
+using AkioExplorer.CloudProviders.Dropbox;
+using AkioExplorer.CloudProviders.GoogleDrive;
+using AkioExplorer.CloudProviders.Http;
+using AkioExplorer.CloudProviders.OneDrive;
 using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Cloud;
+using AkioExplorer.Infrastructure.Security;
 using AkioExplorer.Core.Logic;
 using AkioExplorer.Core.Transfers;
 using AkioExplorer.Infrastructure.Local;
@@ -40,6 +47,9 @@ public partial class App : Application
         _logger = _services.GetRequiredService<ILogger<App>>();
         _logger.LogInformation("AkioExplorer starting");
 
+        // Register stored cloud accounts before panes restore their last folders (no network involved).
+        _services.GetRequiredService<ICloudAccountService>().Initialize();
+
         _window = _services.GetRequiredService<MainWindow>();
         _window.Activate();
     }
@@ -68,6 +78,15 @@ public partial class App : Application
         services.AddSingleton<LocalStorageProvider>();
         services.AddSingleton<IStorageProvider>(sp => sp.GetRequiredService<LocalStorageProvider>());
         services.AddSingleton<IStorageProviderRegistry, StorageProviderRegistry>();
+
+        // Cloud accounts: secrets in Windows Credential Manager, one connector per service.
+        services.AddSingleton(_ => CloudAppsConfig.Load());
+        services.AddSingleton<ICredentialStore, WindowsCredentialStore>();
+        services.AddSingleton<ICloudConnector>(sp => new GoogleDriveConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudConnector>(sp => new DropboxConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudConnector>(sp => new OneDriveConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudAccountService, CloudAccountService>();
+        services.AddSingleton<CloudAccountsViewModel>();
 
         // File operations engine (transfer executors per provider pair; cloud executors arrive in Phase 4)
         services.AddSingleton<ITransferExecutor, LocalTransferExecutor>();

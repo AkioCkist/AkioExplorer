@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>AkioExplorer.CloudProviders</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AkioExplorer.Core\AkioExplorer.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Official SDKs. OneDrive uses the Microsoft Graph REST API directly (see docs/CLOUD-SETUP.md). -->
+    <PackageReference Include="Google.Apis.Drive.v3" Version="1.78.0.4327" />
+    <PackageReference Include="Dropbox.Api" Version="7.4.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="AkioExplorer.Tests" />
+  </ItemGroup>
+</Project>

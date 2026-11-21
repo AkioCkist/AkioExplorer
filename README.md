@@ -29,7 +29,16 @@ Working today (local disks only):
 - Progress panel: percent, speed, time left; operations under ~0.6 s never flash on screen
 - Undo (Ctrl+Z) for rename, new folder, copy and move (moves restore the original names)
 
-Not implemented yet (no UI is shown for these): cloud providers, transfer queue page/history — see roadmap.
+## Status – Phase 3 (Cloud integration) done
+
+- Google Drive (official Drive v3 SDK), Dropbox (official SDK), OneDrive personal + work/school (Microsoft Graph REST)
+- Multiple accounts per service; add, rename, disconnect from the sidebar (right-click) or Settings, with storage usage
+- Sign-in in your own browser with OAuth 2.0 + PKCE (loopback redirect); refresh tokens in Windows Credential Manager
+- Browse, paged listing of large folders, breadcrumbs, create folder, rename, delete (to the service's trash), search
+- Expired or revoked sign-ins show a **Reconnect** button and a warning badge on the account
+- **Requires your own client ids** – see [docs/CLOUD-SETUP.md](docs/CLOUD-SETUP.md). Without them the services show "Setup required".
+
+Not implemented yet (no UI is shown for these): upload/download and cloud-to-cloud copy (transfer engine), transfer queue page/history — see roadmap.
 
 ## Requirements
 

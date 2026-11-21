@@ -27,6 +27,12 @@ public sealed class StorageProviderRegistry : IStorageProviderRegistry
     public IStorageProvider Get(string providerId) =>
         Find(providerId) ?? throw new KeyNotFoundException($"Storage provider '{providerId}' is not registered.");
 
+    public void Unregister(string providerId)
+    {
+        lock (_gate) _providers.RemoveAll(p => p.Id == providerId);
+        ProvidersChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void Register(IStorageProvider provider)
     {
         lock (_gate)

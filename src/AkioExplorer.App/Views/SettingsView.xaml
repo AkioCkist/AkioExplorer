@@ -5,7 +5,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:AkioExplorer.App.Controls"
     xmlns:models="using:AkioExplorer.Core.Models"
-    xmlns:conv="using:AkioExplorer.App.Converters">
+    xmlns:conv="using:AkioExplorer.App.Converters"
+    xmlns:vm="using:AkioExplorer.App.ViewModels">
 
     <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
         <StackPanel x:Name="Body" Padding="32,24,32,32" Spacing="4" HorizontalAlignment="Stretch">
@@ -35,6 +36,43 @@
             </controls:SettingRow>
             <controls:SettingRow Glyph="&#xED1A;" Header="Show hidden items" Description="Hidden files and folders appear dimmed.">
                 <ToggleSwitch IsOn="{x:Bind ViewModel.ShowHiddenItems, Mode=TwoWay}" AutomationProperties.Name="Show hidden items" />
+            </controls:SettingRow>
+
+            <TextBlock Text="Cloud accounts" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
+            <ItemsControl ItemsSource="{x:Bind Cloud.Accounts}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CloudAccountItem">
+                        <Border MinHeight="64" Padding="16,10" Margin="0,0,0,4" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Image Width="24" Height="24" VerticalAlignment="Center">
+                                    <Image.Source>
+                                        <SvgImageSource UriSource="{x:Bind IconUri}" />
+                                    </Image.Source>
+                                </Image>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="{x:Bind Name}" />
+                                    <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <ProgressBar Value="{x:Bind QuotaPercent, Mode=OneWay}" Maximum="100" MaxWidth="260" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                                 Visibility="{x:Bind conv:XamlHelpers.Visible(HasQuota), Mode=OneWay}" />
+                                    <TextBlock Text="{x:Bind QuotaText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Button Content="Rename" Click="OnRenameAccount" Tag="{x:Bind}" />
+                                    <Button Content="Disconnect" Click="OnDisconnectAccount" Tag="{x:Bind}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <controls:SettingRow Glyph="&#xE753;" Header="Add a cloud account" Description="Google Drive, Dropbox or OneDrive. You sign in in your browser; tokens are kept in Windows Credential Manager.">
+                <Button Content="Add account" Style="{StaticResource AccentButtonStyle}" Click="OnAddAccount" />
             </controls:SettingRow>
 
             <TextBlock Text="Copy and move" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />

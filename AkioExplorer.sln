@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkioExplorer.App", "src\Aki
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkioExplorer.Tests", "tests\AkioExplorer.Tests\AkioExplorer.Tests.csproj", "{0E7C2CAC-B4F0-4A39-95C2-4A7F68DF5633}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AkioExplorer.CloudProviders", "src\AkioExplorer.CloudProviders\AkioExplorer.CloudProviders.csproj", "{1F868E8D-7DA9-4AB6-A181-D749080C24B9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -71,6 +73,18 @@ Global
 		{0E7C2CAC-B4F0-4A39-95C2-4A7F68DF5633}.Release|x64.Build.0 = Release|Any CPU
 		{0E7C2CAC-B4F0-4A39-95C2-4A7F68DF5633}.Release|x86.ActiveCfg = Release|Any CPU
 		{0E7C2CAC-B4F0-4A39-95C2-4A7F68DF5633}.Release|x86.Build.0 = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|x64.Build.0 = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Debug|x86.Build.0 = Debug|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|x64.ActiveCfg = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|x64.Build.0 = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|x86.ActiveCfg = Release|Any CPU
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -80,5 +94,6 @@ Global
 		{CC67419D-482F-4B44-B538-8FEC25C48086} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{08DF1740-A667-4ED3-8ED6-ADC052706241} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{0E7C2CAC-B4F0-4A39-95C2-4A7F68DF5633} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{1F868E8D-7DA9-4AB6-A181-D749080C24B9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

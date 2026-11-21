@@ -10,6 +10,12 @@ public enum StorageErrorKind
     InUse,
     Unavailable,
     NotSupported,
+
+    /// <summary>Cloud sign-in expired or was revoked; the user must reconnect the account.</summary>
+    AuthenticationRequired,
+
+    /// <summary>Service is throttling requests or temporarily unavailable.</summary>
+    Throttled,
 }
 
 /// <summary>

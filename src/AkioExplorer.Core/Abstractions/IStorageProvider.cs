@@ -63,5 +63,7 @@ public interface IStorageProviderRegistry
 
     void Register(IStorageProvider provider);
 
+    void Unregister(string providerId);
+
     event EventHandler? ProvidersChanged;
 }

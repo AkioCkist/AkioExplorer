@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AkioExplorer.Core\AkioExplorer.Core.csproj" />
     <ProjectReference Include="..\..\src\AkioExplorer.Infrastructure\AkioExplorer.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\AkioExplorer.CloudProviders\AkioExplorer.CloudProviders.csproj" />
   </ItemGroup>
 </Project>

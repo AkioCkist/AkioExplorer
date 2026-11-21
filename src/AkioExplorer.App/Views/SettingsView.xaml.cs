@@ -11,12 +11,31 @@ public sealed partial class SettingsView : UserControl
     public SettingsView()
     {
         ViewModel = App.Services.GetRequiredService<SettingsViewModel>();
+        Cloud = App.Services.GetRequiredService<CloudAccountsViewModel>();
         InitializeComponent();
+        Loaded += async (_, _) => await Cloud.LoadQuotasAsync();
         ViewModel.Favorites.CollectionChanged += (_, _) => Bindings.Update();
 
     }
 
     public SettingsViewModel ViewModel { get; }
+
+    public CloudAccountsViewModel Cloud { get; }
+
+    private static MainWindow Shell => App.Services.GetRequiredService<MainWindow>();
+
+    private async void OnAddAccount(object sender, RoutedEventArgs e) => await Shell.AddCloudAccountFromSettingsAsync();
+
+    private async void OnRenameAccount(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: CloudAccountItem account })
+            await AccountDialogs.RenameAsync(App.Services.GetRequiredService<Services.DialogService>(), Cloud, account);
+    }
+
+    private async void OnDisconnectAccount(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: CloudAccountItem account }) await Shell.DisconnectFromSettingsAsync(account);
+    }
 
     /// <summary>
     /// NavigationView measures its content with unbounded width, so the host passes the real width in.

@@ -1,3 +1,4 @@
+using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Transfers;
 
 namespace AkioExplorer.Core.Models;
@@ -50,6 +51,7 @@ public sealed class AppSettings
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;
     public int MaxSimultaneousOperations { get; set; } = 2;
     public List<FavoriteEntry> Favorites { get; set; } = new();
+    public List<CloudAccount> CloudAccounts { get; set; } = new();
     public PaneState LeftPane { get; set; } = new();
     public PaneState RightPane { get; set; } = new();
     public WindowPlacement Window { get; set; } = new();

@@ -15,6 +15,7 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly LocalStorageProvider _local;
     private readonly UndoService _undo;
+    private readonly IStorageProviderRegistry _registry;
     private DateTime _lastDriveRefresh = DateTime.MinValue;
 
     public MainViewModel(
@@ -24,8 +25,10 @@ public sealed partial class MainViewModel : ObservableObject
         IKnownFoldersService knownFolders,
         LocalStorageProvider local,
         OperationsViewModel operations,
-        UndoService undo)
+        UndoService undo,
+        IStorageProviderRegistry registry)
     {
+        _registry = registry;
         _settings = settings;
         _local = local;
         _undo = undo;
@@ -70,7 +73,9 @@ public sealed partial class MainViewModel : ObservableObject
         LeftPane.RestoreState(s.LeftPane);
         RightPane.RestoreState(s.RightPane);
 
-        var left = s.RestoreLastLocations ? new StorageLocation(s.LeftPane.ProviderId, s.LeftPane.Path) : Home;
+        var left = s.RestoreLastLocations && _registry.Find(s.LeftPane.ProviderId) is not null
+            ? new StorageLocation(s.LeftPane.ProviderId, s.LeftPane.Path)
+            : Home;
         var leftTask = LeftPane.NavigateAsync(left);
         var drivesTask = RefreshDrivesAsync(force: true);
 
@@ -97,7 +102,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (RightPane.Location is null)
             {
                 var s = _settings.Current.RightPane;
-                var target = _settings.Current.RestoreLastLocations && s.Path.Length > 0
+                var target = _settings.Current.RestoreLastLocations && s.Path.Length > 0 && _registry.Find(s.ProviderId) is not null
                     ? new StorageLocation(s.ProviderId, s.Path)
                     : LeftPane.Location ?? Home;
                 _ = RightPane.NavigateAsync(target);

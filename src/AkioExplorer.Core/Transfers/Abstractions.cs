@@ -42,4 +42,7 @@ public interface IFileOperationService
     event EventHandler<FileOperation>? OperationFinished;
 
     void Remove(FileOperation operation);
+
+    /// <summary>True when an executor exists for copying from one provider to another.</summary>
+    bool CanTransfer(string sourceProviderId, string destinationProviderId);
 }

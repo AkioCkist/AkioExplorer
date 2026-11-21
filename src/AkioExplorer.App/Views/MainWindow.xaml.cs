@@ -23,10 +23,12 @@ public sealed partial class MainWindow : Window
     private readonly DialogService _dialogs;
     private readonly FavoritesService _favorites;
     private readonly ILogger<MainWindow> _logger;
+    private readonly CloudAccountsViewModel _cloud;
+    private const string AddAccountTag = "add-cloud-account";
     private bool _initialized;
     private bool _syncingNav;
 
-    public MainWindow(MainViewModel viewModel, ISettingsService settings, ThemeService theme, DialogService dialogs, FavoritesService favorites, ILogger<MainWindow> logger)
+    public MainWindow(MainViewModel viewModel, ISettingsService settings, ThemeService theme, DialogService dialogs, FavoritesService favorites, ILogger<MainWindow> logger, CloudAccountsViewModel cloud)
     {
         ViewModel = viewModel;
         _settings = settings;
@@ -34,6 +36,7 @@ public sealed partial class MainWindow : Window
         _dialogs = dialogs;
         _favorites = favorites;
         _logger = logger;
+        _cloud = cloud;
         InitializeComponent();
 
         ExtendsContentIntoTitleBar = true;
@@ -64,6 +67,12 @@ public sealed partial class MainWindow : Window
         ViewModel.RightPane.OpenInOtherPaneRequested += (_, location) => ViewModel.OpenInOtherPane(location);
         ViewModel.Favorites.CollectionChanged += (_, _) => BuildSidebar();
         ViewModel.Drives.CollectionChanged += (_, _) => BuildSidebar();
+        _cloud.Changed += (_, _) => BuildSidebar();
+        foreach (var pane in new[] { ViewModel.LeftPane, ViewModel.RightPane })
+        {
+            pane.AuthenticationExpired += (_, providerId) => _cloud.MarkNeedsReconnect(providerId);
+            pane.ReconnectRequested += async (sender, providerId) => await ReconnectAsync(providerId, (FilePaneViewModel)sender!);
+        }
         BuildSidebar();
     }
 
@@ -232,6 +241,31 @@ public sealed partial class MainWindow : Window
             Nav.MenuItems.Add(item);
         }
 
+        Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Cloud accounts" });
+        foreach (var account in _cloud.Accounts)
+        {
+            var item = new NavigationViewItem
+            {
+                Content = account.Name,
+                Icon = AccountDialogs.ProviderIcon(account.IconUri),
+                Tag = _cloud.RootOf(account.Account),
+            };
+            if (account.NeedsReconnect)
+                item.InfoBadge = new InfoBadge { Style = (Style)Application.Current.Resources["AttentionIconInfoBadgeStyle"] };
+            ToolTipService.SetToolTip(item, account.NeedsReconnect ? $"{account.Subtitle} · sign-in expired" : account.Subtitle);
+            item.ContextFlyout = AccountMenu(account);
+            Nav.MenuItems.Add(item);
+        }
+        var add = new NavigationViewItem
+        {
+            Content = "Add cloud account",
+            Icon = new FontIcon { Glyph = "\uE710" },
+            Tag = AddAccountTag,
+            SelectsOnInvoked = false,
+        };
+        ToolTipService.SetToolTip(add, "Connect Google Drive, Dropbox or OneDrive");
+        Nav.MenuItems.Add(add);
+
         Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Local Computer" });
         foreach (var folder in ViewModel.KnownFolders)
             Nav.MenuItems.Add(CreateNavItem(folder.Name, folder.Glyph, new StorageLocation("local", folder.Path), folder.Path));
@@ -286,13 +320,75 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (args.InvokedItemContainer?.Tag is AddAccountTag)
+        {
+            await AddCloudAccountAsync();
+            return;
+        }
+
         if (args.InvokedItemContainer?.Tag is StorageLocation location)
         {
             ShowExplorer();
             await ViewModel.NavigateActiveAsync(location);
+            SyncSidebarSelection(); // if navigation failed, the highlight returns to where the pane really is
             ViewFor(ViewModel.ActivePane).FocusList();
         }
     }
+
+    // ------------------------------------------------------------------ cloud accounts
+
+    private MenuFlyout AccountMenu(CloudAccountItem account)
+    {
+        var menu = new MenuFlyout();
+        var open = new MenuFlyoutItem { Text = "Open in other pane", Icon = new FontIcon { Glyph = "\uE8A4" } };
+        open.Click += (_, _) => ViewModel.OpenInOtherPane(_cloud.RootOf(account.Account));
+        var rename = new MenuFlyoutItem { Text = "Rename…", Icon = new FontIcon { Glyph = "\uE8AC" } };
+        rename.Click += async (_, _) => await AccountDialogs.RenameAsync(_dialogs, _cloud, account);
+        var reconnect = new MenuFlyoutItem { Text = "Reconnect…", Icon = new FontIcon { Glyph = "\uE72C" } };
+        reconnect.Click += async (_, _) => await ReconnectAsync(account.Account.ProviderId, ViewModel.ActivePane);
+        var disconnect = new MenuFlyoutItem { Text = "Disconnect…", Icon = new FontIcon { Glyph = "\uE8D8" } };
+        disconnect.Click += async (_, _) => await DisconnectAsync(account);
+        menu.Items.Add(open);
+        menu.Items.Add(rename);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(reconnect);
+        menu.Items.Add(disconnect);
+        return menu;
+    }
+
+    private async Task AddCloudAccountAsync()
+    {
+        var account = await AccountDialogs.AddAccountAsync(_dialogs, _cloud);
+        if (account is null) return;
+        ShowExplorer();
+        await ViewModel.NavigateActiveAsync(_cloud.RootOf(account));
+        ViewFor(ViewModel.ActivePane).FocusList();
+    }
+
+    private async Task ReconnectAsync(string providerId, FilePaneViewModel pane)
+    {
+        if (_cloud.FindByProvider(providerId) is not { } account) return;
+        if (await AccountDialogs.ReconnectAsync(_dialogs, _cloud, account))
+        {
+            pane.IsErrorOpen = false;
+            BuildSidebar();
+            if (pane.Location?.ProviderId == providerId) pane.RefreshCommand.Execute(null);
+        }
+    }
+
+    private async Task DisconnectAsync(CloudAccountItem account)
+    {
+        if (!await AccountDialogs.DisconnectAsync(_dialogs, _cloud, account)) return;
+        foreach (var pane in new[] { ViewModel.LeftPane, ViewModel.RightPane })
+        {
+            if (pane.Location?.ProviderId == account.Account.ProviderId) await pane.NavigateAsync(MainViewModel.Home);
+        }
+    }
+
+    /// <summary>Used by the Settings page.</summary>
+    public Task AddCloudAccountFromSettingsAsync() => AddCloudAccountAsync();
+
+    public Task DisconnectFromSettingsAsync(CloudAccountItem account) => DisconnectAsync(account);
 
     private void ShowSettings()
     {

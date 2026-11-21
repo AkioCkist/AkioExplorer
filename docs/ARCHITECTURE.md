@@ -22,7 +22,10 @@ src/
     ViewModels/                 MainViewModel, FilePaneViewModel, FileItemViewModel, SettingsViewModel
     Services/                   IconService (cached ImageSource per file type), DialogService
     Converters/, Resources/
-  (Phase 3) AkioExplorer.CloudProviders/  GoogleDrive, Dropbox, OneDrive, Mega, WebDav, Sftp …
+  AkioExplorer.CloudProviders/  net9.0          One folder per service + shared OAuth/HTTP
+    Auth/                       OAuthClient (PKCE + loopback), OAuthTokenSource (refresh, rotation)
+    Http/                       Shared pooled HttpClient + RetryHandler (429/5xx, Retry-After)
+    GoogleDrive/ Dropbox/ OneDrive/   <Service>Connector (sign-in, factory) + <Service>Provider (IStorageProvider)
 tests/
   AkioExplorer.Tests/           xUnit – Core logic + LocalStorageProvider against temp folders
 ```
@@ -50,7 +53,14 @@ interface IStorageProvider {
 }
 ```
 
-Phase 3 adds `ICloudStorageProvider : IStorageProvider` (`AuthenticateAsync`, `SignOutAsync`, quota, server-side copy) and `ICredentialStore` backed by Windows Credential Manager (`CredWrite`/`CredRead`, DPAPI-protected) – no tokens in plaintext.
+Cloud services plug in through two interfaces in `Core/Cloud`:
+
+- `ICloudConnector` – one per service: `AuthenticateAsync` (interactive OAuth), `CreateProvider(account)`, `SignOutAsync`.
+- `ICloudStorageProvider : IStorageProvider` – browsing/file operations for one account, plus quota.
+
+`CloudAccountService` keeps account metadata in settings, secrets in `ICredentialStore` (Windows Credential Manager)
+and registers one provider per account in the registry, so panes, search, drag & drop and the copy engine treat every
+account like a drive. Adding a service = one connector + one provider class; nothing in the UI changes.
 
 ## File operations engine (Phase 2, reused by Phase 4)
 
@@ -76,7 +86,7 @@ touching the engine or UI. Progress is polled by the UI every 250 ms – no per-
 |---|---|---|
 | 1 Foundation | Solution, DI, logging, settings, shell window (Mica, custom title bar), sidebar, toolbar, breadcrumb, local browsing, details/grid view, sorting, filter, dual-pane shell, keyboard model | **done** (also: inline rename, Recycle Bin delete, recursive search) |
 | 2 File management | Copy/move/clipboard, drag & drop (in-app + Explorer), conflict dialog, undo, progress panel | **done** |
-| 3 Cloud integration | Provider SDKs, OAuth 2.0 (loopback + PKCE), Credential Manager token storage, Google Drive / Dropbox / OneDrive | planned |
+| 3 Cloud integration | Provider SDKs, OAuth 2.0 (loopback + PKCE), Credential Manager token storage, Google Drive / Dropbox / OneDrive, account management | **done** |
 | 4 Transfer engine | Queue, bounded concurrency, progress/speed, pause/resume/cancel/retry with backoff, streaming cloud-to-cloud, server-side copy | planned |
 | 5 Advanced | MEGA, Box, pCloud, WebDAV, SFTP, FTP, conflict dialog, history persistence, notifications | planned |
 | 6 Release | Polish, profiling, MSIX packaging | planned |

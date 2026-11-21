@@ -406,6 +406,8 @@ public sealed partial class FilePane : UserControl
 
     private void OnOpenInOtherPane(object sender, RoutedEventArgs e) => ViewModel.RequestOpenInOtherPane();
 
+    private void OnReconnectClick(object sender, RoutedEventArgs e) => ViewModel.RequestReconnect();
+
     private void OnHeaderClick(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string tag } && Enum.TryParse<SortField>(tag, out var field))
@@ -541,6 +543,7 @@ public sealed partial class FilePane : UserControl
         var items = InternalPayload(e.DataView, out string sourceProvider);
         bool external = items is null && e.DataView.Contains(StandardDataFormats.StorageItems);
         if (items is null && !external) return null;
+        if (!ViewModel.CanAcceptFrom(items is null ? LocalStorageProviderId : sourceProvider)) return null;
 
         var target = ItemUnderPointer(e);
         if (target is { IsContainer: false }) target = null;
