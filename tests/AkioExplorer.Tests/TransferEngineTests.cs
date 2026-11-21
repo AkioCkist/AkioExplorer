@@ -15,8 +15,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace AkioExplorer.Tests;
 
 /// <summary>In-memory cloud account ("/a/b" paths) implementing the same contracts as the real providers.</summary>
-internal sealed class MemoryCloud(string id, bool serverCopy = false, bool unknownSizes = false) : IStorageProvider, IFileContentProvider
+internal sealed class MemoryCloud(string id, bool serverCopy = false, bool unknownSizes = false) : IStorageProvider, IFileContentProvider, IDirectDownloadProvider
 {
+    /// <summary>Direct (range) download URL per file; null = no direct link (streaming path).</summary>
+    public Func<StorageItem, DirectDownload?>? DirectLinks { get; set; }
+
+    public Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken) =>
+        Task.FromResult(DirectLinks?.Invoke(file));
+
     public readonly ConcurrentDictionary<string, byte[]?> Entries = new(StringComparer.OrdinalIgnoreCase) { [""] = null };
     public readonly ConcurrentBag<string> Trashed = new();
     public int ServerCopies;

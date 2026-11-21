@@ -22,7 +22,7 @@ namespace AkioExplorer.CloudProviders.GoogleDrive;
 /// without extra requests. <see cref="CombinePath"/> returns a virtual "parentId/name" address that
 /// <see cref="GetItemAsync"/> resolves by name, which lets the generic copy engine check for conflicts.
 /// </summary>
-public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider
+public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
 {
     public const string ServiceName = "Google Drive";
     public const string Root = "root";
@@ -31,7 +31,6 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink";
 
     private const string ApiBase = "https://www.googleapis.com/drive/v3";
-    private const int UploadChunkSize = 8 * 1024 * 1024; // multiple of 256 KiB as the resumable protocol requires
 
     private readonly DriveService _drive;
     private readonly IAccessTokenProvider _tokens;
@@ -287,6 +286,19 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         return memory;
     }
 
+    /// <summary>
+    /// <c>files/{id}?alt=media</c> honours Range requests, so big downloads run over several connections. Google Docs
+    /// are exported on the fly (no Range): they keep the streaming path.
+    /// </summary>
+    public async Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken)
+    {
+        if (IsNative(file, out _)) return null;
+        string token = await _tokens.GetAccessTokenAsync(cancellationToken, forceRefresh: refresh).ConfigureAwait(false);
+        return new DirectDownload(
+            $"{ApiBase}/files/{Uri.EscapeDataString(file.Path)}?alt=media&supportsAllDrives=true",
+            new Dictionary<string, string> { ["Authorization"] = "Bearer " + token, ["User-Agent"] = "AkioExplorer" });
+    }
+
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {
         string url;
@@ -357,7 +369,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
             var update = _drive.Files.Update(new DriveFile(), existing.Path, content, contentType);
             update.Fields = FileFields;
             update.SupportsAllDrives = true;
-            update.ChunkSize = UploadChunkSize;
+            update.ChunkSize = Core.Transfers.UploadChunking.Google(length);
             upload = update;
         }
         else
@@ -365,7 +377,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
             var create = _drive.Files.Create(new DriveFile { Name = name, Parents = [parent] }, content, contentType);
             create.Fields = FileFields;
             create.SupportsAllDrives = true;
-            create.ChunkSize = UploadChunkSize;
+            create.ChunkSize = Core.Transfers.UploadChunking.Google(length);
             upload = create;
         }
 

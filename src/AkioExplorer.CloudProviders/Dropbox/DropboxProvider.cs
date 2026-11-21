@@ -13,11 +13,10 @@ namespace AkioExplorer.CloudProviders.Dropbox;
 /// Dropbox through the official Dropbox .NET SDK. Path addressed ("/Photos/2026"); the SDK refreshes short-lived
 /// access tokens itself from the refresh token kept in Windows Credential Manager.
 /// </summary>
-public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider
+public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
 {
     public const string ServiceName = "Dropbox";
     private const uint PageSize = 2000;
-    private const int ChunkSize = 8 * 1024 * 1024;   // upload session chunk (multiple of 4 MiB as Dropbox recommends)
     private const int MaxChunkAttempts = 4;
 
     private readonly Func<DropboxClient> _clientFactory;
@@ -176,6 +175,16 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, I
         }
     }
 
+    /// <summary><c>get_temporary_link</c>: a 4-hour direct link on Dropbox's content servers, Range supported.</summary>
+    public async Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken)
+    {
+        string path = Normalize(file.Path);
+        var result = await CallAsync(() => Client.Files.GetTemporaryLinkAsync(new GetTemporaryLinkArg(path)), path).ConfigureAwait(false);
+        return string.IsNullOrEmpty(result.Link)
+            ? null
+            : new DirectDownload(result.Link, new Dictionary<string, string> { ["User-Agent"] = "AkioExplorer" }) { MaxConnections = 6 };
+    }
+
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {
         string path = Normalize(file.Path);
@@ -197,10 +206,11 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, I
         EnsureValidName(name);
         string path = CombinePath(parentPath, name);
         var mode = overwrite ? (WriteMode)WriteMode.Overwrite.Instance : WriteMode.Add.Instance;
-        var buffer = new byte[ChunkSize];
+        int chunkSize = Core.Transfers.UploadChunking.Dropbox(length); // bigger chunks for big files: fewer idle round trips
+        var buffer = new byte[chunkSize];
 
         int first = await content.ReadFullAsync(buffer, cancellationToken).ConfigureAwait(false);
-        if (first < ChunkSize)
+        if (first < chunkSize)
         {
             var single = await ChunkAsync(() => Client.Files.UploadAsync(
                 new UploadArg(path, mode, autorename: false, mute: true), new MemoryStream(buffer, 0, first, writable: false)), path, cancellationToken)
@@ -217,7 +227,7 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, I
             cancellationToken.ThrowIfCancellationRequested();
             int read = await content.ReadFullAsync(buffer, cancellationToken).ConfigureAwait(false);
             var cursor = new UploadSessionCursor(start.SessionId, offset);
-            if (read < ChunkSize)
+            if (read < chunkSize)
             {
                 var done = await ChunkAsync(() => Client.Files.UploadSessionFinishAsync(
                     new UploadSessionFinishArg(cursor, new CommitInfo(path, mode, autorename: false, mute: true)),

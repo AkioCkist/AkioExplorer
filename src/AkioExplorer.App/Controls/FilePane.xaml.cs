@@ -495,7 +495,10 @@ public sealed partial class FilePane : UserControl
 
     private void OnListDragOver(object sender, DragEventArgs e)
     {
-        var plan = PlanDrop(e);
+        // "Into this folder" gets its own big target: in a folder full of subfolders every spot is some subfolder.
+        var here = PlanDrop(e, intoCurrentFolder: true);
+        bool overBar = UpdateDropBar(here, e);
+        var plan = overBar ? here : PlanDrop(e);
         if (plan is null)
         {
             e.AcceptedOperation = DataPackageOperation.None;
@@ -510,13 +513,42 @@ public sealed partial class FilePane : UserControl
         SetDropTarget(plan.Value.Target);
     }
 
-    private void OnListDragLeave(object sender, DragEventArgs e) => SetDropTarget(null);
+    private void OnListDragLeave(object sender, DragEventArgs e)
+    {
+        SetDropTarget(null);
+        // DragLeave also bubbles up from child elements: only hide the bar when the pointer really left the pane.
+        var p = e.GetPosition(ContentHost);
+        if (p.X < 0 || p.Y < 0 || p.X >= ContentHost.ActualWidth || p.Y >= ContentHost.ActualHeight) HideDropBar();
+    }
+
+    /// <summary>Shows the "drop into this folder" bar while a drag is over the pane; returns true when the pointer is on it.</summary>
+    private bool UpdateDropBar(DropPlan? here, DragEventArgs e)
+    {
+        if (here is not { } plan)
+        {
+            HideDropBar();
+            return false;
+        }
+
+        DropBarText.Text = $"{(plan.Kind == OperationKind.Move ? "Move" : "Copy")} to {plan.FolderName}";
+        DropBarGlyph.Glyph = plan.Kind == OperationKind.Move ? "" : "";
+        DropBar.Visibility = Visibility.Visible;
+
+        var p = e.GetPosition(DropBar);
+        bool over = DropBar.ActualWidth > 0 && p.X >= 0 && p.Y >= 0 && p.X <= DropBar.ActualWidth && p.Y <= DropBar.ActualHeight;
+        DropBar.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[over ? "AccentFillColorDefaultBrush" : "ControlStrongStrokeColorDefaultBrush"];
+        return over;
+    }
+
+    private void HideDropBar() => DropBar.Visibility = Visibility.Collapsed;
 
     private async void OnListDrop(object sender, DragEventArgs e)
     {
-        var plan = PlanDrop(e);
+        var here = PlanDrop(e, intoCurrentFolder: true);
+        var plan = DropBar.Visibility == Visibility.Visible && UpdateDropBar(here, e) ? here : PlanDrop(e);
         _log.LogDebug("Drop {Plan}", plan);
         SetDropTarget(null);
+        HideDropBar();
         if (plan is not { } p) return;
 
         ViewModel.RequestActivation();
@@ -544,7 +576,7 @@ public sealed partial class FilePane : UserControl
     private readonly record struct DropPlan(OperationKind Kind, string FolderPath, string FolderName, FileItemViewModel? Target);
 
     /// <summary>Decides target folder and copy/move for the current drag position (Explorer rules).</summary>
-    private DropPlan? PlanDrop(DragEventArgs e)
+    private DropPlan? PlanDrop(DragEventArgs e, bool intoCurrentFolder = false)
     {
         if (ViewModel.Provider is not { } provider || ViewModel.Location is not { } location || ViewModel.IsSearchMode) return null;
 
@@ -553,7 +585,7 @@ public sealed partial class FilePane : UserControl
         if (items is null && !external) return null;
         if (!ViewModel.CanAcceptFrom(items is null ? LocalStorageProviderId : sourceProvider)) return null;
 
-        var target = ItemUnderPointer(e);
+        var target = intoCurrentFolder ? null : ItemUnderPointer(e);
         if (target is { IsContainer: false }) target = null;
         if (target is not null && items?.Any(i => string.Equals(i.Path, target.Path, StringComparison.OrdinalIgnoreCase)) == true)
             return null; // can't drop a folder onto itself

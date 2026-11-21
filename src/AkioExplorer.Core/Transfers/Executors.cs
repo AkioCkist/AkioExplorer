@@ -81,6 +81,11 @@ public sealed class StreamingTransferExecutor : ITransferExecutor
                 input = spool;
                 length = spool.Length;
             }
+            else if ((source.Capabilities & StorageCapabilities.OpenWithShell) == 0 && length >= 1 << 20)
+            {
+                // Cloud source: keep downloading the next blocks while the destination confirms upload chunks.
+                input = new ReadAheadStream(input);
+            }
 
             await using var tracked = new TransferStream(input, progress, cancellationToken, leaveOpen: true);
             await writer.WriteFileAsync(parent, name, tracked, length, overwrite, cancellationToken).ConfigureAwait(false);

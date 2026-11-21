@@ -59,7 +59,9 @@ Full steps and troubleshooting: [docs/CLOUD-SETUP.md#google-drive](docs/CLOUD-SE
 ## Status – Phase 4 (Transfer engine) – implemented, partly verified
 
 - Upload / Download toolbar buttons, drag & drop and paste between This PC and clouds, cloud → cloud (streaming) and same-account server-side copy/move
-- Resumable/chunked uploads (Drive resumable, Dropbox sessions, Graph upload sessions) with per-chunk retries; downloads never leave partial files
+- Resumable/chunked uploads (Drive resumable, Dropbox sessions, Graph upload sessions) with per-chunk retries
+- Speed: cloud → PC downloads use up to 8 connections per file with dynamic segmentation (IDM-style engine, `Core/Transfers/Segmented`); partial data sits in `<name>.akiodl` + `.akiodl.json` and Retry resumes it. Uploads use adaptive chunk sizes (bigger chunks for big files = fewer idle round trips), cloud → cloud reads ahead while uploading, and cloud transfers run 4 files at once (`DownloadConnections`, `ParallelFileTransfers` in settings.json)
+- Preview pane (Alt+P, resizable): images, text/code, PDF pages, audio/video player, shell thumbnails, OneCommander-style details (sizes, age, attributes, media/photo/document properties); cloud files use the service's rendition. Grid view shows real thumbnails (local thumbnail cache, Drive/OneDrive/Dropbox renditions)
 - Transfer queue page (pause / resume / cancel), Recent transfers (persisted, retry skips files that already arrived; jobs running at exit are kept as Interrupted)
 - Double-click a cloud file: downloaded to a private cache and opened (read-only working copy)
 - Settings: download folder

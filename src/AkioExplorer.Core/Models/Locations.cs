@@ -43,4 +43,6 @@ public enum SortField
     Size,
 }
 
-public sealed record SortOptions(SortField Field = SortField.Name, bool Descending = false);
+/// <param name="FoldersFirst">Explorer convention (folders above files). Off: folders and files are mixed and
+/// ordered purely by the field, e.g. an old file above a newer folder when sorting by date.</param>
+public sealed record SortOptions(SortField Field = SortField.Name, bool Descending = false, bool FoldersFirst = true);

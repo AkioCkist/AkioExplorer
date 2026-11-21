@@ -16,6 +16,7 @@ public sealed class FileOperationService : IFileOperationService
 
     private readonly IStorageProviderRegistry _registry;
     private readonly IReadOnlyList<ITransferExecutor> _executors;
+    private readonly SemaphoreSlim _conflictGate = new(1);
     private readonly IConflictResolver _resolver;
     private readonly ISettingsService _settings;
     private readonly ILogger<FileOperationService> _logger;
@@ -175,11 +176,23 @@ public sealed class FileOperationService : IFileOperationService
         }
 
         op.SetStatus(OperationStatus.Running);
-        foreach (var top in plan)
+        // Cloud transfers move several files at once: per-file latency (session setup, chunk confirmations, small
+        // files) dominates otherwise. Disk-to-disk copies stay sequential – parallel writes only make the disk seek.
+        bool bothLocal = (src.Capabilities & dst.Capabilities & StorageCapabilities.OpenWithShell) != 0;
+        int parallel = bothLocal ? 1 : Math.Clamp(_settings.Current.ParallelFileTransfers, 1, 8);
+        using var slots = new SemaphoreSlim(parallel);
+        if (parallel == 1)
         {
-            ct.ThrowIfCancellationRequested();
-            await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
-            await TransferTopLevelAsync(op, executor, src, dst, destRoot, top, ct).ConfigureAwait(false);
+            foreach (var top in plan)
+            {
+                ct.ThrowIfCancellationRequested();
+                await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
+                await TransferTopLevelAsync(op, executor, src, dst, destRoot, top, slots, ct).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            await Task.WhenAll(plan.Select(top => TransferTopLevelAsync(op, executor, src, dst, destRoot, top, slots, ct))).ConfigureAwait(false);
         }
 
         op.SetCurrent(null);
@@ -211,8 +224,9 @@ public sealed class FileOperationService : IFileOperationService
     }
 
     private async Task TransferTopLevelAsync(FileOperation op, ITransferExecutor executor, IStorageProvider src, IStorageProvider dst,
-        string destRoot, TopLevel top, CancellationToken ct)
+        string destRoot, TopLevel top, SemaphoreSlim slots, CancellationToken ct)
     {
+        await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         var item = top.Item;
         string topTarget = dst.CombinePath(destRoot, item.Name);
         bool anyWritten = false;
@@ -233,19 +247,21 @@ public sealed class FileOperationService : IFileOperationService
                 await EnsureFolderAsync(dst, path, ct).ConfigureAwait(false);
             }
 
-            foreach (var file in top.Files)
+            // Folder paths are all resolved above, so the cache is only read from here on (safe in parallel).
+            await Task.WhenAll(top.Files.Select(async file =>
             {
-                ct.ThrowIfCancellationRequested();
                 string folder = ResolveFolder(dst, folderPaths, file.RelativeFolder);
-                if (await TransferFileAsync(op, executor, src, dst, file.Item, folder, inPlaceCopy: false, ct).ConfigureAwait(false) is null)
+                if (await InSlotAsync(slots, () => TransferFileAsync(op, executor, src, dst, file.Item, folder, inPlaceCopy: false, ct), ct)
+                        .ConfigureAwait(false) is null)
                     top.Incomplete = true;
-            }
+            })).ConfigureAwait(false);
 
             anyWritten = true;
         }
         else
         {
-            string? written = await TransferFileAsync(op, executor, src, dst, item, destRoot, top.SameFolder, ct).ConfigureAwait(false);
+            string? written = await InSlotAsync(slots, () => TransferFileAsync(op, executor, src, dst, item, destRoot, top.SameFolder, ct), ct)
+                .ConfigureAwait(false);
             if (written is null) top.Incomplete = true;
             else
             {
@@ -273,6 +289,19 @@ public sealed class FileOperationService : IFileOperationService
         else if (op.Kind == OperationKind.Move && top.Incomplete && item.IsContainer)
         {
             op.AddError($"\"{item.Name}\" was only partly moved; the original folder was kept so nothing is lost.");
+        }
+    }
+
+    private static async Task<T> InSlotAsync<T>(SemaphoreSlim slots, Func<Task<T>> work, CancellationToken ct)
+    {
+        await slots.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await work().ConfigureAwait(false);
+        }
+        finally
+        {
+            slots.Release();
         }
     }
 
@@ -368,9 +397,27 @@ public sealed class FileOperationService : IFileOperationService
         public ValueTask WaitIfPausedAsync(CancellationToken cancellationToken) => op.WaitIfPausedAsync(cancellationToken);
 
         public void WaitIfPaused(CancellationToken cancellationToken) => op.WaitIfPaused(cancellationToken);
+
+        public void ReportParts(PartedFileProgress? parts) => op.SetParts(this, parts);
     }
 
     private async Task<ConflictResolution> DecideAsync(FileOperation op, StorageItem source, StorageItem existing, string folderName, CancellationToken ct)
+    {
+        if (op.ConflictAnswerForAll is { } forAll) return forAll;
+
+        // Files run in parallel: one question at a time, and "do this for all" answers the ones waiting.
+        await _conflictGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await DecideLockedAsync(op, source, existing, folderName, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _conflictGate.Release();
+        }
+    }
+
+    private async Task<ConflictResolution> DecideLockedAsync(FileOperation op, StorageItem source, StorageItem existing, string folderName, CancellationToken ct)
     {
         if (op.ConflictAnswerForAll is { } forAll) return forAll;
 

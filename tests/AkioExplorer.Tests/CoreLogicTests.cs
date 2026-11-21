@@ -50,6 +50,19 @@ public class StorageItemComparerTests
         var sorted = items.Order(new StorageItemComparer(new SortOptions(SortField.Modified))).Select(i => i.Name).ToArray();
         Assert.Equal(new[] { "old", "new" }, sorted);
     }
+
+    [Fact]
+    public void Without_folders_first_folders_and_files_mix_by_the_field()
+    {
+        var folder = Folder("Projects") with { Modified = new DateTimeOffset(2026, 1, 10, 0, 0, 0, TimeSpan.Zero) };
+        var items = new[] { File("new.txt", day: 20), folder, File("old.txt", day: 2) };
+
+        var byDate = items.Order(new StorageItemComparer(new SortOptions(SortField.Modified, FoldersFirst: false))).Select(i => i.Name);
+        Assert.Equal(new[] { "old.txt", "Projects", "new.txt" }, byDate);
+
+        var byName = items.Order(new StorageItemComparer(new SortOptions(SortField.Name, FoldersFirst: false))).Select(i => i.Name);
+        Assert.Equal(new[] { "new.txt", "old.txt", "Projects" }, byName);
+    }
 }
 
 public class FileNameValidatorTests

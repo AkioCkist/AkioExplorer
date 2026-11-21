@@ -5,6 +5,7 @@ namespace AkioExplorer.Core.Logic;
 /// <summary>
 /// Explorer-style ordering: folders, then drives, then files; within a group by the chosen field,
 /// ties broken by natural name order. Direction applies to the field, not to the grouping.
+/// With <see cref="SortOptions.FoldersFirst"/> off, folders and files are one list ordered by the field.
 /// </summary>
 public sealed class StorageItemComparer : IComparer<StorageItem>
 {
@@ -24,8 +25,11 @@ public sealed class StorageItemComparer : IComparer<StorageItem>
         if (x is null) return -1;
         if (y is null) return 1;
 
-        int group = ((int)x.Kind).CompareTo((int)y.Kind);
-        if (group != 0) return group;
+        if (_options.FoldersFirst)
+        {
+            int group = ((int)x.Kind).CompareTo((int)y.Kind);
+            if (group != 0) return group;
+        }
 
         int result = _options.Field switch
         {

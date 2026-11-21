@@ -29,6 +29,7 @@ public sealed class PaneState
     public string Path { get; set; } = string.Empty;
     public SortField SortField { get; set; } = SortField.Name;
     public bool SortDescending { get; set; }
+    public bool FoldersFirst { get; set; } = true;
     public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
 }
 
@@ -54,6 +55,12 @@ public sealed class AppSettings
     public bool RestoreLastLocations { get; set; } = true;
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;
     public int MaxSimultaneousOperations { get; set; } = 2;
+
+    /// <summary>Connections per file for cloud downloads (segmented, IDM-style). 1 = plain single stream.</summary>
+    public int DownloadConnections { get; set; } = 8;
+
+    /// <summary>Files transferred at once inside one cloud copy/move (local ↔ local stays one at a time).</summary>
+    public int ParallelFileTransfers { get; set; } = 4;
 
     /// <summary>Where "Download" saves files; empty = the Windows Downloads folder.</summary>
     public string DownloadFolder { get; set; } = string.Empty;

@@ -17,14 +17,13 @@ namespace AkioExplorer.CloudProviders.OneDrive;
 /// OneDrive (personal and work/school) through the Microsoft Graph v1.0 REST API, path addressed
 /// ("/Documents/Report.docx"). Large folders are paged (999 items per request) and streamed to the UI.
 /// </summary>
-public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider
+public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
 {
     public const string ServiceName = "OneDrive";
     internal const string GraphBase = "https://graph.microsoft.com/v1.0";
     private const string Select = "id,name,size,lastModifiedDateTime,createdDateTime,folder,file,package,remoteItem,parentReference";
 
     private const int SimpleUploadLimit = 4 * 1024 * 1024;
-    private const int ChunkSize = 32 * 320 * 1024; // 10 MiB; Graph requires multiples of 320 KiB
     private const int MaxChunkAttempts = 5;
     private static readonly TimeSpan CopyTimeout = TimeSpan.FromMinutes(30);
 
@@ -214,6 +213,20 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         return memory;
     }
 
+    /// <summary>
+    /// Graph hands out a short-lived, pre-authenticated <c>@microsoft.graph.downloadUrl</c> (no token needed, Range
+    /// supported); a fresh one is fetched when it expires mid-download.
+    /// </summary>
+    public async Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken)
+    {
+        string path = Normalize(file.Path);
+        using var json = await SendAsync(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}?$select=id,@microsoft.graph.downloadUrl", null, cancellationToken, path)
+            .ConfigureAwait(false);
+        return json is not null && json.RootElement.TryGetProperty("@microsoft.graph.downloadUrl", out var url) && url.GetString() is { Length: > 0 } link
+            ? new DirectDownload(link, new Dictionary<string, string> { ["User-Agent"] = "AkioExplorer" })
+            : null; // OneNote packages etc. have no file stream
+    }
+
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {
         string path = Normalize(file.Path);
@@ -259,7 +272,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
 
         try
         {
-            var buffer = new byte[ChunkSize];
+            var buffer = new byte[Core.Transfers.UploadChunking.OneDrive(length)];
             long offset = 0;
             while (true)
             {

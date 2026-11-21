@@ -57,7 +57,9 @@ public sealed class ThumbnailService
             ImageSource? source;
             try
             {
-                source = isLocal ? await LocalAsync(item.Path, cts.Token) : await CloudAsync(thumbnails!, item, cts.Token);
+                // A cloud thumbnail is a few KB: once started, let it finish and cache it (scrolling back is then
+                // instant) rather than abort the connection. Cancelling still drops requests that haven't started.
+                source = isLocal ? await LocalAsync(item.Path, cts.Token) : await CloudAsync(thumbnails!, item, CancellationToken.None);
             }
             finally
             {

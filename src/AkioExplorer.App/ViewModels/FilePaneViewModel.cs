@@ -130,6 +130,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     [ObservableProperty] private FileViewMode _viewMode;
     [ObservableProperty] private SortField _sortField = SortField.Name;
     [ObservableProperty] private bool _sortDescending;
+    [ObservableProperty] private bool _foldersFirst = true;
     [ObservableProperty] private bool _isSearchMode;
     [ObservableProperty] private bool _isSearching;
     [ObservableProperty] private string _statusText = string.Empty;
@@ -533,7 +534,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     private void SortList(List<FileItemViewModel> list)
     {
-        var comparer = new StorageItemComparer(new SortOptions(SortField, SortDescending), _shell.GetTypeName);
+        var comparer = new StorageItemComparer(new SortOptions(SortField, SortDescending, FoldersFirst), _shell.GetTypeName);
         list.Sort((a, b) => comparer.Compare(a.Item, b.Item));
     }
 
@@ -577,6 +578,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     partial void OnSortFieldChanged(SortField value) => Resort();
 
     partial void OnSortDescendingChanged(bool value) => Resort();
+
+    partial void OnFoldersFirstChanged(bool value) => Resort();
 
     partial void OnViewModeChanged(FileViewMode value)
     {
@@ -1221,6 +1224,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         Path = Location?.Path ?? string.Empty,
         SortField = SortField,
         SortDescending = SortDescending,
+        FoldersFirst = FoldersFirst,
         ViewMode = ViewMode,
     };
 
@@ -1228,7 +1232,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     {
         _sortDescending = state.SortDescending;
         _sortField = state.SortField;
+        _foldersFirst = state.FoldersFirst;
         _viewMode = state.ViewMode;
+        OnPropertyChanged(nameof(FoldersFirst));
         OnPropertyChanged(nameof(SortField));
         OnPropertyChanged(nameof(SortDescending));
         OnPropertyChanged(nameof(ViewMode));

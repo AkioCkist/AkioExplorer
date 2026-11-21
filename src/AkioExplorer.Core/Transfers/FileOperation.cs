@@ -66,7 +66,15 @@ public interface ITransferProgress
 
     /// <summary>Blocks while the operation is paused (OS callbacks that can't await).</summary>
     void WaitIfPaused(CancellationToken cancellationToken);
+
+    /// <summary>Live per-connection parts of a multi-connection download (null when the file is done).</summary>
+    void ReportParts(PartedFileProgress? parts)
+    {
+    }
 }
+
+/// <summary>One file being downloaded over several connections: where each part is and how far it got.</summary>
+public sealed record PartedFileProgress(string Name, long Total, int Connections, IReadOnlyList<Segmented.SegmentSnapshot> Segments);
 
 /// <summary>
 /// One copy/move job. Progress fields are written by the worker and read by the UI on a timer
@@ -240,6 +248,18 @@ public sealed class FileOperation
     }
 
     internal void AddTransferred(long bytes) => Interlocked.Add(ref _transferredBytes, bytes);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<object, PartedFileProgress> _parted = new();
+
+    /// <summary>Files currently downloading in parts (IDM-style segment bars in the UI), in name order.</summary>
+    public IReadOnlyList<PartedFileProgress> PartedFiles =>
+        _parted.Values.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    internal void SetParts(object key, PartedFileProgress? parts)
+    {
+        if (parts is null) _parted.TryRemove(key, out _);
+        else _parted[key] = parts;
+    }
 
     internal void FileDone() => Interlocked.Increment(ref _completedFiles);
 

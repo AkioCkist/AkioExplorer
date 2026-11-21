@@ -172,6 +172,9 @@
                                     <MenuFlyoutSeparator />
                                     <RadioMenuFlyoutItem x:Name="SortAsc" Text="Ascending" GroupName="dir" Tag="Asc" Click="OnSortDirectionClick" />
                                     <RadioMenuFlyoutItem x:Name="SortDesc" Text="Descending" GroupName="dir" Tag="Desc" Click="OnSortDirectionClick" />
+                                    <MenuFlyoutSeparator />
+                                    <ToggleMenuFlyoutItem x:Name="SortFoldersFirst" Text="Folders first" Click="OnFoldersFirstClick"
+                                                          ToolTipService.ToolTip="Off: folders and files are ordered together by the chosen field" />
                                 </MenuFlyout>
                             </AppBarButton.Flyout>
                         </AppBarButton>
@@ -229,13 +232,38 @@
                             <ItemsControl ItemsSource="{x:Bind ViewModel.Operations.Items}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:OperationItemViewModel">
-                                        <Grid ColumnSpacing="12" Padding="0,4">
+                                        <Grid ColumnSpacing="12" RowSpacing="4" Padding="0,4">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="220" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <!-- Multi-connection downloads: compact part bars (file name on hover) -->
+                                            <ItemsControl Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" ItemsSource="{x:Bind Parts}"
+                                                          Visibility="{x:Bind conv:XamlHelpers.Visible(HasParts), Mode=OneWay}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate><StackPanel Spacing="3" /></ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:PartedFileViewModel">
+                                                        <Grid ColumnSpacing="8" Background="Transparent" ToolTipService.ToolTip="{x:Bind Name}">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <controls:SegmentBar Height="5" VerticalAlignment="Center"
+                                                                                 Segments="{x:Bind Segments, Mode=OneWay}" Total="{x:Bind Total, Mode=OneWay}" />
+                                                            <TextBlock Grid.Column="1" Text="{x:Bind Summary, Mode=OneWay}" FontSize="11"
+                                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" />
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                             <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" VerticalAlignment="Center" />
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                 <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />

@@ -121,6 +121,9 @@ public partial class App : Application
         // streaming (upload, download, cloud↔cloud).
         services.AddSingleton<ITransferExecutor, LocalTransferExecutor>();
         services.AddSingleton<ITransferExecutor, ServerSideTransferExecutor>();
+        // Cloud → PC: several connections per file (before the generic streaming executor, which it falls back to).
+        services.AddSingleton<ITransferExecutor>(sp =>
+            new SegmentedDownloadExecutor(() => sp.GetRequiredService<ISettingsService>().Current.DownloadConnections));
         services.AddSingleton<ITransferExecutor, StreamingTransferExecutor>();
         services.AddSingleton<JsonTransferHistory>();
         services.AddSingleton<ITransferHistory>(sp => sp.GetRequiredService<JsonTransferHistory>());

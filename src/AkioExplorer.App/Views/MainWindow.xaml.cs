@@ -605,7 +605,11 @@ public sealed partial class MainWindow : Window
         SortSize.IsChecked = pane.SortField == SortField.Size;
         SortAsc.IsChecked = !pane.SortDescending;
         SortDesc.IsChecked = pane.SortDescending;
+        SortFoldersFirst.IsChecked = pane.FoldersFirst;
     }
+
+    private void OnFoldersFirstClick(object sender, RoutedEventArgs e) =>
+        ViewModel.ActivePane.FoldersFirst = SortFoldersFirst.IsChecked;
 
     private void OnSortFieldClick(object sender, RoutedEventArgs e)
     {

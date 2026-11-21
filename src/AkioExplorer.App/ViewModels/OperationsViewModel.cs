@@ -225,6 +225,10 @@ public sealed partial class OperationItemViewModel : ObservableObject
     [ObservableProperty] private bool _hasProblem;
     [ObservableProperty] private bool _isPaused;
     [ObservableProperty] private bool _canRetry;
+    [ObservableProperty] private bool _hasParts;
+
+    /// <summary>Files downloading over several connections right now, each with its IDM-style part bar.</summary>
+    public ObservableCollection<PartedFileViewModel> Parts { get; } = new();
 
     public OperationItemViewModel(FileOperation operation, Action<OperationItemViewModel> dismiss, Action<OperationItemViewModel> retry)
     {
@@ -283,6 +287,7 @@ public sealed partial class OperationItemViewModel : ObservableObject
 
         IsPaused = op.IsPaused;
         IsRunning = !op.IsFinished;
+        SyncParts(op.IsFinished ? [] : op.PartedFiles);
         HasProblem = op.Status is OperationStatus.Failed or OperationStatus.CompletedWithErrors;
         CanRetry = op.Status is OperationStatus.Failed or OperationStatus.CompletedWithErrors;
         IsIndeterminate = !op.IsPaused && op.Status is OperationStatus.Queued or OperationStatus.Preparing;
@@ -299,6 +304,22 @@ public sealed partial class OperationItemViewModel : ObservableObject
                 OperationStatus.Canceled => "Canceled",
                 _ => ProblemText(op),
             };
+    }
+
+    /// <summary>Updates the part bars in place (stable items: no flicker, no re-templating every tick).</summary>
+    private void SyncParts(IReadOnlyList<PartedFileProgress> files)
+    {
+        for (int i = Parts.Count - 1; i >= 0; i--)
+        {
+            if (!files.Any(f => f.Name == Parts[i].Name)) Parts.RemoveAt(i);
+        }
+        for (int i = 0; i < files.Count; i++)
+        {
+            var existing = Parts.FirstOrDefault(p => p.Name == files[i].Name);
+            if (existing is null) Parts.Insert(Math.Min(i, Parts.Count), existing = new PartedFileViewModel(files[i].Name));
+            existing.Update(files[i]);
+        }
+        HasParts = Parts.Count > 0;
     }
 
     private string RunningText(FileOperation op, long total, long done)
@@ -420,4 +441,24 @@ public sealed class TransferRecordViewModel(TransferRecord record)
     public string ErrorText => Record.Errors.Count == 0 ? string.Empty : Record.Errors[0];
 
     public bool HasError => Record.Errors.Count > 0;
+}
+
+/// <summary>One file in a multi-connection download: its parts and how many connections work on it.</summary>
+public sealed partial class PartedFileViewModel(string name) : ObservableObject
+{
+    public string Name { get; } = name;
+
+    [ObservableProperty] private IReadOnlyList<Core.Transfers.Segmented.SegmentSnapshot>? _segments;
+    [ObservableProperty] private long _total;
+    [ObservableProperty] private string _summary = string.Empty;
+
+    public void Update(PartedFileProgress progress)
+    {
+        Total = progress.Total;
+        Segments = progress.Segments;
+        int parts = progress.Segments.Count;
+        long done = progress.Segments.Sum(s => s.Position - s.Start);
+        string percent = progress.Total > 0 ? $"{100.0 * done / progress.Total:0}%" : Formatting.FormatSize(done);
+        Summary = $"{percent}  ·  {parts} {(parts == 1 ? "part" : "parts")}  ·  {progress.Connections} {(progress.Connections == 1 ? "connection" : "connections")}";
+    }
 }

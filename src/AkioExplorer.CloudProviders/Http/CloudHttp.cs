@@ -24,7 +24,11 @@ public static class CloudHttp
 /// <summary>
 /// Retries throttled (429) and transient (500/502/503/504, network) failures with exponential backoff and jitter,
 /// honouring Retry-After. Only for requests whose content can be resent (no streamed uploads).
+/// Marked non-user code: a request the app cancels on purpose (thumbnail scrolled away, preview moved on) throws
+/// through this handler into HttpClient, which Visual Studio's Just My Code would otherwise report as
+/// "user-unhandled" and break on – although the caller handles it.
 /// </summary>
+[System.Diagnostics.DebuggerNonUserCode]
 public sealed class RetryHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
 {
     private const int MaxAttempts = 4;
