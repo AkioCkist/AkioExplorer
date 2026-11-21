@@ -15,4 +15,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="AkioExplorer.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Optional, git-ignored: the app's own OAuth client ids, so users sign in with one click (docs/CLOUD-SETUP.md). -->
+    <EmbeddedResource Include="cloud-apps.builtin.json" Condition="Exists('cloud-apps.builtin.json')" LogicalName="AkioExplorer.CloudApps.BuiltIn.json" />
+  </ItemGroup>
 </Project>

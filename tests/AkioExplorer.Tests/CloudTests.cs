@@ -321,7 +321,7 @@ public class GoogleDriveProviderTests
                           {"id":"X1","name":"notes.txt","mimeType":"text/plain","size":"42","parents":["F1"],"modifiedTime":"2026-03-01T00:00:00Z"}]}
                 """);
         var account = new CloudAccount { Type = CloudProviderType.GoogleDrive, DisplayName = "My Drive" };
-        var provider = new GoogleDriveProvider(account, new StaticTokens(), new FakeFactory(fake));
+        var provider = new GoogleDriveProvider(account, new StaticTokens(), new HttpClient(fake), new FakeFactory(fake));
 
         var root = new List<StorageItem>();
         await foreach (var page in provider.ListAsync(GoogleDriveProvider.Root, CancellationToken.None)) root.AddRange(page);

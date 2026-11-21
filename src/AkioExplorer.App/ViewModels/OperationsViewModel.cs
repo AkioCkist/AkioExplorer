@@ -11,8 +11,9 @@ using Microsoft.UI.Dispatching;
 namespace AkioExplorer.App.ViewModels;
 
 /// <summary>
-/// Bottom progress panel. Follows the response-time limits: operations that finish within ~0.6 s never appear
-/// (no flashing), longer ones show percent, speed and time left, failures stay until dismissed.
+/// Live operations: the transfer queue page (<see cref="Queue"/>) and the compact bottom panel (<see cref="Items"/>).
+/// Follows the response-time limits: operations that finish within ~0.6 s never appear in the panel (no flashing),
+/// longer ones show percent, speed and time left, failures stay until dismissed or retried.
 /// </summary>
 public sealed partial class OperationsViewModel : ObservableObject
 {
@@ -38,30 +39,56 @@ public sealed partial class OperationsViewModel : ObservableObject
         service.OperationFinished += (_, op) => dispatcher.TryEnqueue(() => OnFinished(op));
     }
 
+    /// <summary>Bottom panel: operations running longer than a moment, plus failures.</summary>
     public ObservableCollection<OperationItemViewModel> Items { get; } = new();
 
+    /// <summary>Transfer queue page: everything queued, running or paused.</summary>
+    public ObservableCollection<OperationItemViewModel> Queue { get; } = new();
+
     [ObservableProperty] private bool _hasItems;
+    [ObservableProperty] private int _activeCount;
+    [ObservableProperty] private bool _hasQueue;
 
     /// <summary>Raised on the UI thread when an operation finishes, so panes can select the new items.</summary>
     public event EventHandler<FileOperation>? OperationCompleted;
 
+    [RelayCommand]
+    private void PauseAll()
+    {
+        foreach (var item in Queue) item.Operation.Pause();
+        Tick();
+    }
+
+    [RelayCommand]
+    private void ResumeAll()
+    {
+        foreach (var item in Queue) item.Operation.Resume();
+        Tick();
+    }
+
     private void OnQueued(FileOperation op)
     {
-        _pending.Add(new OperationItemViewModel(op, Dismiss));
+        var item = new OperationItemViewModel(op, Dismiss, Retry);
+        _pending.Add(item);
+        if (!op.Options.Internal) Queue.Add(item);
+        UpdateCounts();
         _timer.Start();
     }
 
     private void OnFinished(FileOperation op)
     {
-        var item = Items.FirstOrDefault(i => i.Operation == op) ?? _pending.FirstOrDefault(i => i.Operation == op);
+        var item = Items.FirstOrDefault(i => i.Operation == op) ?? _pending.FirstOrDefault(i => i.Operation == op)
+                   ?? Queue.FirstOrDefault(i => i.Operation == op);
         if (item is not null)
         {
             item.Refresh();
+            Queue.Remove(item); // finished jobs live on in Recent transfers
             bool problem = op.Status is OperationStatus.Failed or OperationStatus.CompletedWithErrors;
             if (problem && !Items.Contains(item)) Show(item); // errors are always visible
         }
 
-        RegisterUndo(op);
+        UpdateCounts();
+        if (!op.Options.Internal) RegisterUndo(op);
         OperationCompleted?.Invoke(this, op);
     }
 
@@ -81,17 +108,23 @@ public sealed partial class OperationsViewModel : ObservableObject
             }
         }
 
-        foreach (var item in Items.ToList())
+        foreach (var item in Items.Union(Queue).ToList())
         {
             item.Refresh();
-            if (item.Operation.Status is OperationStatus.Completed or OperationStatus.Canceled &&
+            if (Items.Contains(item) && item.Operation.Status is OperationStatus.Completed or OperationStatus.Canceled &&
                 item.Operation.FinishedAt is { } finished && now - finished >= KeepCompletedFor)
             {
                 Dismiss(item);
             }
         }
 
-        if (_pending.Count == 0 && Items.All(i => i.Operation.IsFinished && i.HasProblem)) _timer.Stop();
+        if (_pending.Count == 0 && Queue.Count == 0 && Items.All(i => i.Operation.IsFinished && i.HasProblem)) _timer.Stop();
+    }
+
+    private void UpdateCounts()
+    {
+        ActiveCount = Queue.Count;
+        HasQueue = Queue.Count > 0;
     }
 
     private void Show(OperationItemViewModel item)
@@ -107,8 +140,18 @@ public sealed partial class OperationsViewModel : ObservableObject
         if (!item.Operation.IsFinished) item.Operation.Cancel();
         Items.Remove(item);
         _pending.Remove(item);
+        if (item.Operation.IsFinished) Queue.Remove(item);
         _service.Remove(item.Operation);
         HasItems = Items.Count > 0;
+        UpdateCounts();
+    }
+
+    private void Retry(OperationItemViewModel item)
+    {
+        var op = item.Operation;
+        Dismiss(item);
+        if (_registry.Find(op.SourceProviderId) is null || _registry.Find(op.Destination.ProviderId) is null) return;
+        _service.Retry(op.Kind, op.SourceProviderId, op.Items, op.Destination);
     }
 
     private void RegisterUndo(FileOperation op)
@@ -120,7 +163,7 @@ public sealed partial class OperationsViewModel : ObservableObject
         var source = _registry.Find(op.SourceProviderId);
         if (destination is null || source is null) return;
 
-        string what = op.Items.Count == 1 ? $"\"{op.Items[0].Name}\"" : $"{op.Items.Count:N0} items";
+        string what = op.What;
         if (op.Kind == OperationKind.Copy)
         {
             _undo.Push($"Copy {what}", () => destination.DeleteAsync(created, permanent: !destination.Capabilities.HasFlag(StorageCapabilities.RecycleBin), CancellationToken.None));
@@ -169,6 +212,7 @@ public sealed partial class OperationsViewModel : ObservableObject
 public sealed partial class OperationItemViewModel : ObservableObject
 {
     private readonly Action<OperationItemViewModel> _dismiss;
+    private readonly Action<OperationItemViewModel> _retry;
     private long _lastBytes;
     private DateTimeOffset _lastSample = DateTimeOffset.Now;
     private double _speed; // bytes/s, smoothed
@@ -179,11 +223,14 @@ public sealed partial class OperationItemViewModel : ObservableObject
     [ObservableProperty] private bool _isIndeterminate = true;
     [ObservableProperty] private bool _isRunning = true;
     [ObservableProperty] private bool _hasProblem;
+    [ObservableProperty] private bool _isPaused;
+    [ObservableProperty] private bool _canRetry;
 
-    public OperationItemViewModel(FileOperation operation, Action<OperationItemViewModel> dismiss)
+    public OperationItemViewModel(FileOperation operation, Action<OperationItemViewModel> dismiss, Action<OperationItemViewModel> retry)
     {
         Operation = operation;
         _dismiss = dismiss;
+        _retry = retry;
         Refresh();
     }
 
@@ -191,8 +238,31 @@ public sealed partial class OperationItemViewModel : ObservableObject
 
     public string Glyph => Operation.Kind == OperationKind.Copy ? "" : "";
 
+    public string Route => $"{Operation.SourceName}  →  {Operation.DestinationName}";
+
+    public string PauseGlyph => IsPaused ? "" : "";
+
+    public string PauseLabel => IsPaused ? "Resume" : "Pause";
+
+    partial void OnIsPausedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PauseGlyph));
+        OnPropertyChanged(nameof(PauseLabel));
+    }
+
     [RelayCommand]
     private void CancelOrDismiss() => _dismiss(this);
+
+    [RelayCommand]
+    private void PauseOrResume()
+    {
+        if (Operation.IsPaused) Operation.Resume();
+        else Operation.Pause();
+        Refresh();
+    }
+
+    [RelayCommand]
+    private void Retry() => _retry(this);
 
     public void Refresh()
     {
@@ -206,25 +276,29 @@ public sealed partial class OperationItemViewModel : ObservableObject
         if (seconds >= 0.2)
         {
             double instant = Math.Max(0, done - _lastBytes) / seconds;
-            _speed = _speed == 0 ? instant : _speed * 0.7 + instant * 0.3;
+            _speed = op.IsPaused ? 0 : _speed == 0 ? instant : _speed * 0.7 + instant * 0.3;
             _lastBytes = done;
             _lastSample = now;
         }
 
+        IsPaused = op.IsPaused;
         IsRunning = !op.IsFinished;
         HasProblem = op.Status is OperationStatus.Failed or OperationStatus.CompletedWithErrors;
-        IsIndeterminate = op.Status is OperationStatus.Queued or OperationStatus.Preparing;
+        CanRetry = op.Status is OperationStatus.Failed or OperationStatus.CompletedWithErrors;
+        IsIndeterminate = !op.IsPaused && op.Status is OperationStatus.Queued or OperationStatus.Preparing;
         Progress = total > 0 ? Math.Min(100, 100.0 * done / total) : op.IsFinished ? 100 : 0;
 
-        Detail = op.Status switch
-        {
-            OperationStatus.Queued => "Waiting for other transfers to finish…",
-            OperationStatus.Preparing => "Preparing…",
-            OperationStatus.Running => RunningText(op, total, done),
-            OperationStatus.Completed => op.SkippedFiles > 0 ? $"Done · {op.SkippedFiles:N0} skipped" : "Done",
-            OperationStatus.Canceled => "Canceled",
-            _ => ProblemText(op),
-        };
+        Detail = op.IsPaused && !op.IsFinished
+            ? $"Paused  ·  {Progress:0}%  ·  {Formatting.FormatSize(done)} of {Formatting.FormatSize(total)}"
+            : op.Status switch
+            {
+                OperationStatus.Queued => "Waiting for other transfers to finish…",
+                OperationStatus.Preparing => "Preparing…",
+                OperationStatus.Running => RunningText(op, total, done),
+                OperationStatus.Completed => op.SkippedFiles > 0 ? $"Done · {op.SkippedFiles:N0} skipped" : "Done",
+                OperationStatus.Canceled => "Canceled",
+                _ => ProblemText(op),
+            };
     }
 
     private string RunningText(FileOperation op, long total, long done)
@@ -236,6 +310,7 @@ public sealed partial class OperationItemViewModel : ObservableObject
             double remaining = (total - done) / _speed;
             if (remaining >= 1) parts.Add(FormatEta(remaining) + " left");
         }
+        if (op.TotalFiles > 1) parts.Add($"{op.CompletedFiles:N0} of {op.TotalFiles:N0} files");
         if (op.CurrentItem is { } current) parts.Add(current);
         return string.Join("  ·  ", parts);
     }
@@ -247,10 +322,102 @@ public sealed partial class OperationItemViewModel : ObservableObject
         return errors.Count == 1 ? errors[0] : $"{errors.Count:N0} problems. First: {errors[0]}";
     }
 
-    private static string FormatEta(double seconds) => seconds switch
+    internal static string FormatEta(double seconds) => seconds switch
     {
         < 60 => $"{seconds:0} s",
         < 3600 => $"{(int)(seconds / 60)} min {(int)(seconds % 60)} s",
         _ => $"{(int)(seconds / 3600)} h {(int)(seconds % 3600 / 60)} min",
     };
+}
+
+/// <summary>Recent transfers (persisted history) with retry.</summary>
+public sealed partial class TransferHistoryViewModel : ObservableObject
+{
+    private readonly ITransferHistory _history;
+    private readonly IFileOperationService _service;
+    private readonly IStorageProviderRegistry _registry;
+    private readonly DispatcherQueue _dispatcher;
+
+    public TransferHistoryViewModel(ITransferHistory history, IFileOperationService service, IStorageProviderRegistry registry, DispatcherQueue dispatcher)
+    {
+        _history = history;
+        _service = service;
+        _registry = registry;
+        _dispatcher = dispatcher;
+        history.Changed += (_, _) => _dispatcher.TryEnqueue(Rebuild);
+        Rebuild();
+    }
+
+    public ObservableCollection<TransferRecordViewModel> Records { get; } = new();
+
+    [ObservableProperty] private bool _hasRecords;
+
+    [ObservableProperty] private string _message = string.Empty;
+
+    [RelayCommand]
+    private void Clear() => _history.Clear();
+
+    public void Retry(TransferRecordViewModel record)
+    {
+        var r = record.Record;
+        if (_registry.Find(r.SourceProviderId) is null || _registry.Find(r.Destination.ProviderId) is null)
+        {
+            Message = "One of the accounts in this transfer isn't connected any more.";
+            return;
+        }
+        Message = string.Empty;
+        _history.Remove(r.Id);
+        _service.Retry(r.Kind, r.SourceProviderId, r.Items, r.Destination);
+    }
+
+    public void Remove(TransferRecordViewModel record) => _history.Remove(record.Record.Id);
+
+    private void Rebuild()
+    {
+        Records.Clear();
+        foreach (var r in _history.Records) Records.Add(new TransferRecordViewModel(r));
+        HasRecords = Records.Count > 0;
+    }
+}
+
+public sealed class TransferRecordViewModel(TransferRecord record)
+{
+    public TransferRecord Record { get; } = record;
+
+    public string Title => Record.Title;
+
+    public string Route => $"{Record.SourceName}  →  {Record.DestinationName}";
+
+    public bool CanRetry => Record.CanRetry;
+
+    public string Glyph => Record.Status switch
+    {
+        OperationStatus.Completed => "",
+        OperationStatus.CompletedWithErrors => "",
+        OperationStatus.Canceled => "",
+        OperationStatus.Interrupted => "",
+        _ => "",
+    };
+
+    public string StatusText
+    {
+        get
+        {
+            string status = Record.Status switch
+            {
+                OperationStatus.Completed => Record.Skipped > 0 ? $"Done, {Record.Skipped:N0} skipped" : "Done",
+                OperationStatus.CompletedWithErrors => $"Done with {Record.Errors.Count:N0} problem(s)",
+                OperationStatus.Canceled => "Canceled",
+                OperationStatus.Interrupted => "Interrupted when AkioExplorer closed",
+                _ => "Failed",
+            };
+            string size = Record.TotalBytes > 0 ? $"  ·  {Formatting.FormatSize(Record.TransferredBytes)} of {Formatting.FormatSize(Record.TotalBytes)}" : string.Empty;
+            string when = Record.Finished is { } f ? $"  ·  {f.LocalDateTime:g}" : string.Empty;
+            return status + size + when;
+        }
+    }
+
+    public string ErrorText => Record.Errors.Count == 0 ? string.Empty : Record.Errors[0];
+
+    public bool HasError => Record.Errors.Count > 0;
 }

@@ -6,3 +6,6 @@ obj/
 TestResults/
 AppPackages/
 *.binlog
+
+# OAuth client ids embedded into local builds (see docs/CLOUD-SETUP.md)
+src/AkioExplorer.CloudProviders/cloud-apps.builtin.json

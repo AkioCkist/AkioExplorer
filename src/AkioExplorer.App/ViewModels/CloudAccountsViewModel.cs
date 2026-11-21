@@ -34,6 +34,10 @@ public sealed partial class CloudAccountsViewModel : ObservableObject
     /// <summary>Picks up edits to cloud-apps.json without restarting.</summary>
     public void ReloadConfiguration() => _config.Reload();
 
+    /// <summary>Saves a client id the user entered in the add-account dialog (one-time setup per service).</summary>
+    public void SaveRegistration(CloudProviderType type, string clientId, string? clientSecret) =>
+        _config.Save(type, clientId, clientSecret);
+
     [ObservableProperty] private bool _hasAccounts;
 
     /// <summary>Raised when an account needs the user to sign in again (sidebar shows a warning).</summary>

@@ -1,13 +1,17 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Runtime.CompilerServices;
+using System.Net.Http.Headers;
 using AkioExplorer.CloudProviders.Auth;
+using AkioExplorer.CloudProviders.Http;
+using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Models;
 using Google;
 using Google.Apis.Drive.v3;
 using Google.Apis.Http;
 using Google.Apis.Services;
+using Google.Apis.Upload;
 using DriveFile = Google.Apis.Drive.v3.Data.File;
 
 namespace AkioExplorer.CloudProviders.GoogleDrive;
@@ -18,7 +22,7 @@ namespace AkioExplorer.CloudProviders.GoogleDrive;
 /// without extra requests. <see cref="CombinePath"/> returns a virtual "parentId/name" address that
 /// <see cref="GetItemAsync"/> resolves by name, which lets the generic copy engine check for conflicts.
 /// </summary>
-public sealed class GoogleDriveProvider : ICloudStorageProvider
+public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider
 {
     public const string ServiceName = "Google Drive";
     public const string Root = "root";
@@ -26,19 +30,28 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
     private const string ShortcutMime = "application/vnd.google-apps.shortcut";
     private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType)";
 
+    private const string ApiBase = "https://www.googleapis.com/drive/v3";
+    private const int UploadChunkSize = 8 * 1024 * 1024; // multiple of 256 KiB as the resumable protocol requires
+
     private readonly DriveService _drive;
+    private readonly IAccessTokenProvider _tokens;
+    private readonly HttpClient _http;
     private readonly ConcurrentDictionary<string, (string Name, string? Parent)> _nodes = new();
+    private readonly ConcurrentDictionary<string, string> _mimeById = new();
+    private readonly ConcurrentDictionary<string, string> _resolvedFolders = new();
     private string? _rootId;
 
-    public GoogleDriveProvider(CloudAccount account, IAccessTokenProvider tokens)
-        : this(account, tokens, null)
+    public GoogleDriveProvider(CloudAccount account, IAccessTokenProvider tokens, HttpClient http)
+        : this(account, tokens, http, null)
     {
     }
 
     /// <summary>Test seam: <paramref name="httpFactory"/> replaces the SDK's HTTP stack.</summary>
-    internal GoogleDriveProvider(CloudAccount account, IAccessTokenProvider tokens, IHttpClientFactory? httpFactory)
+    internal GoogleDriveProvider(CloudAccount account, IAccessTokenProvider tokens, HttpClient http, IHttpClientFactory? httpFactory)
     {
         Account = account;
+        _tokens = tokens;
+        _http = http;
         _drive = new DriveService(new BaseClientService.Initializer
         {
             HttpClientFactory = httpFactory ?? new HttpClientFactory(),
@@ -59,7 +72,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
 
     public StorageCapabilities Capabilities =>
         StorageCapabilities.CreateFolder | StorageCapabilities.Rename | StorageCapabilities.Delete |
-        StorageCapabilities.RecycleBin | StorageCapabilities.Search;
+        StorageCapabilities.RecycleBin | StorageCapabilities.Search | StorageCapabilities.ServerSideCopy;
 
     public string RootPath => Root;
 
@@ -137,6 +150,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
         create.Fields = FileFields;
         create.SupportsAllDrives = true;
         var folder = await ExecuteAsync(() => create.ExecuteAsync(cancellationToken), parentPath).ConfigureAwait(false);
+        _resolvedFolders[CombinePath(parentPath, name)] = folder.Id;
         return ToItem(folder, parent);
     }
 
@@ -226,6 +240,164 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
         return new CloudIdentity(about.User?.EmailAddress, about.User?.DisplayName, about.User?.PermissionId ?? about.User?.EmailAddress);
     }
 
+    // ------------------------------------------------------------------ content
+
+    /// <summary>Google-native documents have no bytes of their own; they are exported to the matching Office/PDF format.</summary>
+    private static (string Mime, string Extension)? ExportFormat(string mime) => mime switch
+    {
+        "application/vnd.google-apps.document" => ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"),
+        "application/vnd.google-apps.spreadsheet" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"),
+        "application/vnd.google-apps.presentation" => ("application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"),
+        "application/vnd.google-apps.drawing" => ("image/png", ".png"),
+        "application/vnd.google-apps.script" => ("application/vnd.google-apps.script+json", ".json"),
+        _ => null,
+    };
+
+    private bool IsNative(StorageItem file, out string mime) =>
+        _mimeById.TryGetValue(file.Path, out mime!) && mime.StartsWith("application/vnd.google-apps.", StringComparison.Ordinal);
+
+    public string GetTransferName(StorageItem file) =>
+        IsNative(file, out var mime) && ExportFormat(mime) is { } format && !file.Name.EndsWith(format.Extension, StringComparison.OrdinalIgnoreCase)
+            ? file.Name + format.Extension
+            : file.Name;
+
+    public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
+    {
+        string url;
+        if (IsNative(file, out var mime))
+        {
+            var format = ExportFormat(mime) ?? throw new StorageException(StorageErrorKind.NotSupported,
+                $"\"{file.Name}\" ({GoogleTypeName(mime) ?? "Google file"}) can't be downloaded. Open it in your browser instead.");
+            url = $"{ApiBase}/files/{Uri.EscapeDataString(file.Path)}/export?mimeType={Uri.EscapeDataString(format.Mime)}";
+        }
+        else
+        {
+            url = $"{ApiBase}/files/{Uri.EscapeDataString(file.Path)}?alt=media&supportsAllDrives=true";
+        }
+
+        for (int attempt = 0; ; attempt++)
+        {
+            string token = await _tokens.GetAccessTokenAsync(cancellationToken, forceRefresh: attempt > 0).ConfigureAwait(false);
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            HttpResponseMessage response;
+            try
+            {
+                response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                request.Dispose();
+                throw new StorageException(StorageErrorKind.Unavailable, "Can't reach Google Drive. Check your internet connection.", ex);
+            }
+
+            if (response.IsSuccessStatusCode)
+                return new OwnedStream(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), response);
+
+            var status = response.StatusCode;
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            response.Dispose();
+            request.Dispose();
+            if (status == HttpStatusCode.Unauthorized && attempt == 0) continue;
+            throw status switch
+            {
+                HttpStatusCode.NotFound => new StorageException(StorageErrorKind.NotFound, $"\"{file.Name}\" no longer exists in {DisplayName}."),
+                HttpStatusCode.Forbidden when body.Contains("exportSizeLimitExceeded") =>
+                    new StorageException(StorageErrorKind.NotSupported, $"\"{file.Name}\" is too large for Google to export."),
+                HttpStatusCode.Forbidden when body.Contains("cannotDownloadAbusiveFile") =>
+                    new StorageException(StorageErrorKind.AccessDenied, $"Google blocked downloading \"{file.Name}\" (flagged as harmful)."),
+                HttpStatusCode.Forbidden => new StorageException(StorageErrorKind.AccessDenied, $"You don't have permission to download \"{file.Name}\"."),
+                HttpStatusCode.TooManyRequests => new StorageException(StorageErrorKind.Throttled, "Google Drive is limiting requests right now."),
+                HttpStatusCode.Unauthorized => new StorageException(StorageErrorKind.AuthenticationRequired,
+                    $"The sign-in for \"{DisplayName}\" has expired. Reconnect the account to continue."),
+                _ => new StorageException(StorageErrorKind.Unknown, $"Google Drive download failed ({(int)status})."),
+            };
+        }
+    }
+
+    /// <summary>Resumable upload in 8 MiB chunks; the SDK retries failed chunks.</summary>
+    public async Task<StorageItem> WriteFileAsync(string parentPath, string name, Stream content, long length, bool overwrite, CancellationToken cancellationToken)
+    {
+        EnsureValidName(name);
+        string parent = await ResolveFolderIdAsync(parentPath, cancellationToken).ConfigureAwait(false);
+        var existing = await GetItemAsync(CombinePath(parent, name), cancellationToken).ConfigureAwait(false);
+        if (existing is not null && !overwrite)
+            throw new StorageException(StorageErrorKind.AlreadyExists, $"There's already an item named \"{name}\" here.");
+
+        string contentType = StreamExtensions.GuessMimeType(name);
+        ResumableUpload<DriveFile, DriveFile> upload;
+        if (existing is { IsContainer: false })
+        {
+            var update = _drive.Files.Update(new DriveFile(), existing.Path, content, contentType);
+            update.Fields = FileFields;
+            update.SupportsAllDrives = true;
+            update.ChunkSize = UploadChunkSize;
+            upload = update;
+        }
+        else
+        {
+            var create = _drive.Files.Create(new DriveFile { Name = name, Parents = [parent] }, content, contentType);
+            create.Fields = FileFields;
+            create.SupportsAllDrives = true;
+            create.ChunkSize = UploadChunkSize;
+            upload = create;
+        }
+
+        var result = await upload.UploadAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (result.Status != UploadStatus.Completed)
+        {
+            throw result.Exception switch
+            {
+                GoogleApiException api => Map(api, parentPath),
+                StorageException storage => storage,
+                OperationCanceledException canceled => canceled,
+                HttpRequestException http => new StorageException(StorageErrorKind.Unavailable, "Upload to Google Drive was interrupted. Check your connection.", http),
+                { } other => new StorageException(StorageErrorKind.Unknown, $"Upload to Google Drive failed: {other.Message}", other),
+                null => new StorageException(StorageErrorKind.Unknown, "Upload to Google Drive failed."),
+            };
+        }
+
+        var body = upload switch
+        {
+            FilesResource.CreateMediaUpload c => c.ResponseBody,
+            FilesResource.UpdateMediaUpload u => u.ResponseBody,
+            _ => null,
+        };
+        return body is null
+            ? (await GetItemAsync(CombinePath(parent, name), cancellationToken).ConfigureAwait(false))!
+            : ToItem(body, parent);
+    }
+
+    public async Task<StorageItem?> CopyWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken)
+    {
+        if (source.IsContainer) return null; // Drive copies files only; the engine recreates folders
+        string parent = await ResolveFolderIdAsync(parentPath, cancellationToken).ConfigureAwait(false);
+        var copy = _drive.Files.Copy(new DriveFile { Name = name, Parents = [parent] }, source.Path);
+        copy.Fields = FileFields;
+        copy.SupportsAllDrives = true;
+        var file = await ExecuteAsync(() => copy.ExecuteAsync(cancellationToken), source.Path).ConfigureAwait(false);
+        return ToItem(file, parent);
+    }
+
+    /// <summary>Moving = changing parents (instant, also for whole folders).</summary>
+    public async Task<StorageItem?> MoveWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken)
+    {
+        string parent = await ResolveFolderIdAsync(parentPath, cancellationToken).ConfigureAwait(false);
+        var get = _drive.Files.Get(source.Path);
+        get.Fields = "parents";
+        get.SupportsAllDrives = true;
+        var current = await ExecuteAsync(() => get.ExecuteAsync(cancellationToken), source.Path).ConfigureAwait(false);
+
+        var update = _drive.Files.Update(new DriveFile { Name = name }, source.Path);
+        update.AddParents = parent;
+        update.RemoveParents = string.Join(',', current.Parents ?? []);
+        update.Fields = FileFields;
+        update.SupportsAllDrives = true;
+        var moved = await ExecuteAsync(() => update.ExecuteAsync(cancellationToken), source.Path).ConfigureAwait(false);
+        return ToItem(moved, parent);
+    }
+
     // ------------------------------------------------------------------ id ↔ name/parent cache
 
     public IReadOnlyList<BreadcrumbSegment> GetBreadcrumb(string path)
@@ -291,8 +463,10 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
         if (path == Root) return Root;
         if (path.LastIndexOf('/') > 0)
         {
+            if (_resolvedFolders.TryGetValue(path, out var cached)) return cached;
             var item = await GetItemAsync(path, cancellationToken).ConfigureAwait(false)
                        ?? throw new StorageException(StorageErrorKind.NotFound, $"Can't find \"{GetDisplayName(path)}\" in {DisplayName}.");
+            if (item.IsContainer) _resolvedFolders[path] = item.Path; // copy jobs resolve the same folders for every file
             return item.Path;
         }
         return path;
@@ -336,6 +510,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider
         string? parentId = parentPath ?? file.Parents?.FirstOrDefault();
         if (parentId is not null && parentId == _rootId) parentId = Root;
         _nodes[id] = (file.Name, parentId);
+        _mimeById[id] = mime;
 
         return new StorageItem
         {

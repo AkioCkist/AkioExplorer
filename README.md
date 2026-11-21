@@ -36,9 +36,34 @@ Working today (local disks only):
 - Sign-in in your own browser with OAuth 2.0 + PKCE (loopback redirect); refresh tokens in Windows Credential Manager
 - Browse, paged listing of large folders, breadcrumbs, create folder, rename, delete (to the service's trash), search
 - Expired or revoked sign-ins show a **Reconnect** button and a warning badge on the account
-- **Requires your own client ids** – see [docs/CLOUD-SETUP.md](docs/CLOUD-SETUP.md). Without them the services show "Setup required".
+- **Needs OAuth client ids** – embed them in the build (`cloud-apps.builtin.json`, one-click sign-in for users) or enter one per service in the "Add cloud account" dialog; see [docs/CLOUD-SETUP.md](docs/CLOUD-SETUP.md).
+- New accounts are named service + e-mail, e.g. `Google Drive you@gmail.com` (rename any time)
 
-Not implemented yet (no UI is shown for these): upload/download and cloud-to-cloud copy (transfer engine), transfer queue page/history — see roadmap.
+### Google Drive – Google Cloud Console checklist
+
+Full steps and troubleshooting: [docs/CLOUD-SETUP.md#google-drive](docs/CLOUD-SETUP.md#google-drive).
+
+1. [console.cloud.google.com](https://console.cloud.google.com/) → select/create the project (top picker).
+2. **APIs & Services → Library → Google Drive API → Enable**.
+3. **Google Auth Platform → Branding**: app name + support/developer e-mail (skip the logo).
+4. **Audience**: External; while *Testing*, add every account that signs in under **Test users** – otherwise Google shows `Error 403: access_denied`.
+5. **Clients → Create client → Desktop app** (no redirect URI needed) → copy Client ID + Client secret.
+6. Put them in `src/AkioExplorer.CloudProviders/cloud-apps.builtin.json` (git-ignored) and rebuild, or paste them in "Add cloud account":
+
+   ```json
+   { "GoogleDrive": { "ClientId": "….apps.googleusercontent.com", "ClientSecret": "GOCSPX-…" } }
+   ```
+
+7. In *Testing*, Google expires the `drive` refresh token after 7 days (app shows **Reconnect**). **Audience → Publish app** removes that (unverified apps: ≤ 100 users, consent screen shows a warning – fine for personal use).
+
+## Status – Phase 4 (Transfer engine) – implemented, partly verified
+
+- Upload / Download toolbar buttons, drag & drop and paste between This PC and clouds, cloud → cloud (streaming) and same-account server-side copy/move
+- Resumable/chunked uploads (Drive resumable, Dropbox sessions, Graph upload sessions) with per-chunk retries; downloads never leave partial files
+- Transfer queue page (pause / resume / cancel), Recent transfers (persisted, retry skips files that already arrived; jobs running at exit are kept as Interrupted)
+- Double-click a cloud file: downloaded to a private cache and opened (read-only working copy)
+- Settings: download folder
+- Debug builds only: AKIO_DEV_CLOUD=<folder> adds a folder-backed fake cloud for testing transfer UI without OAuth
 
 ## Requirements
 
@@ -81,3 +106,4 @@ Set `AKIO_DEBUG_LOG=1` to write debug-level logs.
 | Properties | Alt+Enter |
 | Focus sidebar | Ctrl+1 |
 | Jump to item | type its first letters |
+

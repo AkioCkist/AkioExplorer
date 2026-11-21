@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using AkioExplorer.App.Services;
 using AkioExplorer.App.ViewModels;
 using AkioExplorer.CloudProviders;
+using AkioExplorer.CloudProviders.Dropbox;
 using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Models;
 using Microsoft.UI.Xaml;
@@ -34,6 +34,34 @@ public static class AccountDialogs
 
         var setup = new StackPanel { Spacing = 12, Visibility = Visibility.Collapsed };
 
+        // OAuth 2.0 + PKCE: the sign-in page opens in the default Windows browser; the dialog waits for the redirect.
+        async Task SignInAsync(CloudServiceItem service)
+        {
+            message.IsOpen = false;
+            setup.Visibility = Visibility.Collapsed;
+            choices.Visibility = Visibility.Collapsed;
+            waiting.Visibility = Visibility.Visible;
+            waitingText.Text = $"Sign in to {service.Name} in the browser window that just opened.\nThis window continues automatically.";
+            signIn = new CancellationTokenSource();
+            try
+            {
+                result = await accounts.AddAsync(service.Type, signIn.Token);
+                dialog.Hide();
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                if (signIn.IsCancellationRequested) return; // dialog closed
+                Show(message, "Sign-in was cancelled.", InfoBarSeverity.Informational);
+            }
+            catch (StorageException ex)
+            {
+                Show(message, ex.Message, InfoBarSeverity.Error);
+            }
+            choices.Visibility = Visibility.Visible;
+            waiting.Visibility = Visibility.Collapsed;
+        }
+
         foreach (var service in accounts.Services)
         {
             var button = new Button
@@ -47,33 +75,11 @@ public static class AccountDialogs
             button.Click += async (_, _) =>
             {
                 message.IsOpen = false;
-                accounts.ReloadConfiguration(); // the user may have just saved cloud-apps.json
-                if (!service.IsConfigured)
-                {
-                    ShowSetup(setup, choices, service);
-                    return;
-                }
-
-                choices.Visibility = Visibility.Collapsed;
-                waiting.Visibility = Visibility.Visible;
-                waitingText.Text = $"Finish signing in to {service.Name} in your browser.\nThis window continues automatically.";
-                signIn = new CancellationTokenSource();
-                try
-                {
-                    result = await accounts.AddAsync(service.Type, signIn.Token);
-                    dialog.Hide();
-                }
-                catch (OperationCanceledException)
-                {
-                    if (signIn.IsCancellationRequested) return; // dialog closed
-                    Show(message, "Sign-in was cancelled.", InfoBarSeverity.Informational);
-                }
-                catch (StorageException ex)
-                {
-                    Show(message, ex.Message, InfoBarSeverity.Error);
-                }
-                choices.Visibility = Visibility.Visible;
-                waiting.Visibility = Visibility.Collapsed;
+                accounts.ReloadConfiguration(); // picks up cloud-apps.json / environment changes
+                if (service.IsConfigured)
+                    await SignInAsync(service);
+                else
+                    ShowSetup(setup, choices, message, service, accounts, SignInAsync);
             };
             choices.Children.Add(button);
         }
@@ -175,7 +181,7 @@ public static class AccountDialogs
         text.Children.Add(new TextBlock { Text = service.Name });
         text.Children.Add(new TextBlock
         {
-            Text = service.IsConfigured ? "Sign in with your browser" : "Setup required",
+            Text = service.IsConfigured ? "Sign in with your browser" : "One-time setup, then sign in with your browser",
             Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
         });
@@ -184,18 +190,73 @@ public static class AccountDialogs
         return row;
     }
 
-    private static void ShowSetup(StackPanel setup, StackPanel choices, CloudServiceItem service)
+    /// <summary>What the user needs from each service's developer console (only shown when the build has no built-in id).</summary>
+    private sealed record SetupInfo(string ConsoleUrl, string Steps, string IdLabel, bool NeedsSecret);
+
+    private static SetupInfo SetupFor(CloudProviderType type) => type switch
     {
+        CloudProviderType.GoogleDrive => new(
+            "https://console.cloud.google.com/apis/credentials",
+            "Enable the Google Drive API, then create an OAuth client ID of type \"Desktop app\". Add your Google account as a test user on the OAuth consent screen.",
+            "Client ID", NeedsSecret: true),
+        CloudProviderType.Dropbox => new(
+            "https://www.dropbox.com/developers/apps",
+            $"Create a \"Scoped access\" app with Full Dropbox, enable the files.* and account_info.read permissions, and add the redirect URI http://localhost:{DropboxConnector.RedirectPort}/",
+            "App key", NeedsSecret: false),
+        _ => new(
+            "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+            "New registration → personal and work accounts → redirect URI \"Public client/native\" http://localhost. Under Authentication, allow public client flows.",
+            "Application (client) ID", NeedsSecret: false),
+    };
+
+    private static void ShowSetup(StackPanel setup, StackPanel choices, InfoBar message, CloudServiceItem service,
+        CloudAccountsViewModel accounts, Func<CloudServiceItem, Task> signIn)
+    {
+        var info = SetupFor(service.Type);
         setup.Children.Clear();
-        setup.Children.Add(new TextBlock { Text = $"Set up {service.Name}", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
-        setup.Children.Add(new TextBlock { Text = service.SetupHint, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        setup.Children.Add(new TextBlock { Text = $"Connect AkioExplorer to {service.Name}", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
+        setup.Children.Add(new TextBlock
+        {
+            Text = $"One-time step: {service.Name} only lets registered apps sign in. {info.Steps} After this, signing in is just your browser.",
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
+
+        var console = new HyperlinkButton { Content = $"Open {service.Name} developer console", NavigateUri = new Uri(info.ConsoleUrl), Padding = new Thickness(0) };
+        setup.Children.Add(console);
+
+        var id = new TextBox { Header = info.IdLabel, MinWidth = 380 };
+        setup.Children.Add(id);
+        TextBox? secret = null;
+        if (info.NeedsSecret)
+        {
+            secret = new TextBox { Header = "Client secret (Google requires it for desktop apps; it isn't confidential)" };
+            setup.Children.Add(secret);
+        }
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var open = new Button { Content = "Open cloud-apps.json" };
-        open.Click += (_, _) =>
+        var save = new Button
         {
-            CloudAppsConfig.EnsureTemplate();
-            Process.Start(new ProcessStartInfo("notepad.exe", $"\"{CloudAppsConfig.FilePath}\"") { UseShellExecute = true })?.Dispose();
+            Content = "Save and sign in",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+            IsEnabled = false,
+        };
+        void Validate() => save.IsEnabled = id.Text.Trim().Length > 0 && (secret is null || secret.Text.Trim().Length > 0);
+        id.TextChanged += (_, _) => Validate();
+        if (secret is not null) secret.TextChanged += (_, _) => Validate();
+
+        save.Click += async (_, _) =>
+        {
+            try
+            {
+                accounts.SaveRegistration(service.Type, id.Text, secret?.Text);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Show(message, $"Couldn't save {CloudAppsConfig.FilePath}: {ex.Message}", InfoBarSeverity.Error);
+                return;
+            }
+            await signIn(service);
         };
         var back = new Button { Content = "Back" };
         back.Click += (_, _) =>
@@ -203,12 +264,13 @@ public static class AccountDialogs
             setup.Visibility = Visibility.Collapsed;
             choices.Visibility = Visibility.Visible;
         };
-        buttons.Children.Add(open);
+        buttons.Children.Add(save);
         buttons.Children.Add(back);
         setup.Children.Add(buttons);
 
         choices.Visibility = Visibility.Collapsed;
         setup.Visibility = Visibility.Visible;
+        id.Loaded += (_, _) => id.Focus(FocusState.Programmatic);
     }
 
     private static void Show(InfoBar bar, string text, InfoBarSeverity severity)

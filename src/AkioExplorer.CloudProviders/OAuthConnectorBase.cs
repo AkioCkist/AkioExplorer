@@ -32,7 +32,7 @@ public abstract class OAuthConnectorBase : ICloudConnector
     public bool IsConfigured => Registration.IsSet;
 
     public virtual string SetupHint =>
-        $"{Name} needs an app registration (a free client id from the service's developer console). Add it to {CloudAppsConfig.FilePath} – the steps are in docs/CLOUD-SETUP.md – save, then choose {Name} again.";
+        $"{Name} needs a client id from its developer console (one-time). Add it in \"Add cloud account\" or see docs/CLOUD-SETUP.md.";
 
     protected abstract OAuthClient CreateOAuthClient();
 

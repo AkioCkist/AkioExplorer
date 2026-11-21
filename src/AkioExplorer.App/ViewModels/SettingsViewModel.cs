@@ -24,6 +24,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _restoreLastLocations;
     [ObservableProperty] private int _conflictBehaviorIndex;
     [ObservableProperty] private double _maxSimultaneousOperations;
+    [ObservableProperty] private string _downloadFolderText = string.Empty;
 
     public SettingsViewModel(ISettingsService settings, ThemeService theme, FavoritesService favorites)
     {
@@ -39,6 +40,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _restoreLastLocations = s.RestoreLastLocations;
         _conflictBehaviorIndex = (int)s.ConflictBehavior;
         _maxSimultaneousOperations = s.MaxSimultaneousOperations;
+        _downloadFolderText = string.IsNullOrWhiteSpace(s.DownloadFolder) ? "Windows Downloads folder" : s.DownloadFolder;
     }
 
     public ObservableCollection<FavoriteEntry> Favorites => _favorites.Items;
@@ -88,6 +90,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (double.IsNaN(value)) return;
         _settings.Current.MaxSimultaneousOperations = (int)Math.Clamp(Math.Round(value), 1, 8);
+        _settings.Save();
+    }
+
+    public void SetDownloadFolder(string? path)
+    {
+        _settings.Current.DownloadFolder = path ?? string.Empty;
+        DownloadFolderText = string.IsNullOrWhiteSpace(path) ? "Windows Downloads folder" : path;
         _settings.Save();
     }
 

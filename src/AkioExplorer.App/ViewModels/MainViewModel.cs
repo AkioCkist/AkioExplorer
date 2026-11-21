@@ -16,6 +16,8 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly LocalStorageProvider _local;
     private readonly UndoService _undo;
     private readonly IStorageProviderRegistry _registry;
+    private readonly IFileOperationService _operations;
+    private readonly IShellActions _shell;
     private DateTime _lastDriveRefresh = DateTime.MinValue;
 
     public MainViewModel(
@@ -26,9 +28,13 @@ public sealed partial class MainViewModel : ObservableObject
         LocalStorageProvider local,
         OperationsViewModel operations,
         UndoService undo,
-        IStorageProviderRegistry registry)
+        IStorageProviderRegistry registry,
+        IFileOperationService operationsService,
+        IShellActions shell)
     {
         _registry = registry;
+        _operations = operationsService;
+        _shell = shell;
         _settings = settings;
         _local = local;
         _undo = undo;
@@ -44,6 +50,8 @@ public sealed partial class MainViewModel : ObservableObject
         RightPane.ActivationRequested += (_, _) => ActivePane = RightPane;
         LeftPane.TransferToOtherPaneRequested += (_, kind) => TransferToOtherPane(LeftPane, kind);
         RightPane.TransferToOtherPaneRequested += (_, kind) => TransferToOtherPane(RightPane, kind);
+        LeftPane.OpenRemoteRequested += (_, item) => OpenRemoteFile(LeftPane, item);
+        RightPane.OpenRemoteRequested += (_, item) => OpenRemoteFile(RightPane, item);
 
         _activePane = LeftPane;
         LeftPane.IsActive = true;
@@ -102,7 +110,7 @@ public sealed partial class MainViewModel : ObservableObject
             if (RightPane.Location is null)
             {
                 var s = _settings.Current.RightPane;
-                var target = _settings.Current.RestoreLastLocations && s.Path.Length > 0 && _registry.Find(s.ProviderId) is not null
+                var target = _settings.Current.RestoreLastLocations && (s.Path.Length > 0 || s.ProviderId != "local") && _registry.Find(s.ProviderId) is not null
                     ? new StorageLocation(s.ProviderId, s.Path)
                     : LeftPane.Location ?? Home;
                 _ = RightPane.NavigateAsync(target);
@@ -170,12 +178,62 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var source = ActivePane;
         if (source.Provider is null || source.SelectedItems.Count == 0) return;
-        var items = source.SelectedItems.Select(s => s.Item).ToList();
-        var pane = LeftPane.Location?.Equals(destination) == true ? LeftPane
-            : RightPane.Location?.Equals(destination) == true ? RightPane
-            : source;
-        pane.Transfer(kind, source.Provider.Id, items, destination.Path);
+        if (!_operations.CanTransfer(source.Provider.Id, destination.ProviderId))
+        {
+            source.ShowError("Items can't be copied to that location.");
+            return;
+        }
+        _operations.Enqueue(kind, source.Provider.Id, source.SelectedItems.Select(s => s.Item).ToList(), destination);
     }
+
+    /// <summary>Download folder from Settings, or the Windows Downloads folder.</summary>
+    public string DownloadFolder
+    {
+        get
+        {
+            string configured = _settings.Current.DownloadFolder;
+            if (!string.IsNullOrWhiteSpace(configured)) return configured;
+            return KnownFolders.FirstOrDefault(k => k.Name == "Downloads")?.Path
+                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        }
+    }
+
+    public void DownloadSelection(string? folder = null)
+    {
+        string target = folder ?? DownloadFolder;
+        Directory.CreateDirectory(target);
+        TransferSelectionTo(OperationKind.Copy, new StorageLocation("local", target));
+    }
+
+    /// <summary>
+    /// Double-clicking a cloud file downloads it to a private cache and opens it with its Windows app.
+    /// (A read-only working copy: edits aren't uploaded back automatically.)
+    /// </summary>
+    private void OpenRemoteFile(FilePaneViewModel pane, StorageItem item)
+    {
+        if (pane.Provider is null) return;
+        string cache = Path.Combine(Infrastructure.Settings.AppPaths.DataFolder, "Cache", "Open",
+            string.Concat(pane.Provider.Id.Where(char.IsLetterOrDigit)));
+        Directory.CreateDirectory(cache);
+
+        var op = _operations.Enqueue(OperationKind.Copy, pane.Provider.Id, [item], new StorageLocation("local", cache),
+            new TransferOptions { Conflict = ConflictResolution.Replace, Internal = true });
+        op.Finished += (_, _) =>
+        {
+            if (op.Status != OperationStatus.Completed || op.CreatedPaths.Count == 0) return;
+            string path = op.CreatedPaths[0];
+            try
+            {
+                _shell.Open(path);
+            }
+            catch (StorageException ex)
+            {
+                RemoteOpenFailed?.Invoke(this, (pane, ex.Message));
+            }
+        };
+    }
+
+    public event EventHandler<(FilePaneViewModel Pane, string Message)>? RemoteOpenFailed;
 
     private void OnOperationCompleted(object? sender, FileOperation op)
     {

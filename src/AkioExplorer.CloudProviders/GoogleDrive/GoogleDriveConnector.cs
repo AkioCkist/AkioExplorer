@@ -29,5 +29,5 @@ public sealed class GoogleDriveConnector(CloudAppsConfig config, ICredentialStor
     protected override Task<CloudIdentity> GetIdentityAsync(CloudAccount account, string accessToken, CancellationToken cancellationToken) =>
         GoogleDriveProvider.GetIdentityAsync(TokenSource(account), cancellationToken);
 
-    public override ICloudStorageProvider CreateProvider(CloudAccount account) => new GoogleDriveProvider(account, TokenSource(account));
+    public override ICloudStorageProvider CreateProvider(CloudAccount account) => new GoogleDriveProvider(account, TokenSource(account), Http);
 }

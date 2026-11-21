@@ -46,10 +46,19 @@ public sealed class FileOperationService : IFileOperationService
 
     public event EventHandler<FileOperation>? OperationFinished;
 
-    public FileOperation Enqueue(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination)
+    public FileOperation Retry(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination) =>
+        Enqueue(kind, sourceProviderId, items, destination, new TransferOptions { SkipIdentical = true });
+
+    public FileOperation Enqueue(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination,
+        TransferOptions? options = null)
     {
         var destinationProvider = _registry.Get(destination.ProviderId);
-        var operation = new FileOperation(kind, sourceProviderId, items, destination, destinationProvider.GetDisplayName(destination.Path));
+        var sourceProvider = _registry.Find(sourceProviderId);
+        string sourceName = sourceProvider is null || items.Count == 0
+            ? sourceProviderId
+            : sourceProvider.GetParentPath(items[0].Path) is { } parent ? sourceProvider.GetDisplayName(parent) : sourceProvider.DisplayName;
+        var operation = new FileOperation(kind, sourceProviderId, items, destination, sourceName,
+            destinationProvider.GetDisplayName(destination.Path), options);
         lock (_operations) _operations.Add(operation);
         OperationQueued?.Invoke(this, operation);
         _ = Task.Run(() => RunAsync(operation));
@@ -169,12 +178,16 @@ public sealed class FileOperationService : IFileOperationService
         foreach (var top in plan)
         {
             ct.ThrowIfCancellationRequested();
+            await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
             await TransferTopLevelAsync(op, executor, src, dst, destRoot, top, ct).ConfigureAwait(false);
         }
 
         op.SetCurrent(null);
         op.SetStatus(op.Errors.Count > 0 ? OperationStatus.CompletedWithErrors : OperationStatus.Completed);
     }
+
+    private static string TransferName(IStorageProvider src, StorageItem file) =>
+        src is IFileContentProvider content && !file.IsContainer ? content.GetTransferName(file) : file.Name;
 
     private static async Task ExpandAsync(IStorageProvider src, string folderPath, string relative, TopLevel top, CancellationToken ct)
     {
@@ -247,7 +260,10 @@ public sealed class FileOperationService : IFileOperationService
         {
             try
             {
-                await src.DeleteAsync([item.Path], permanent: true, ct).ConfigureAwait(false);
+                // Local moves delete the original like Explorer; cloud originals go to the service's trash so a
+                // mistaken move stays recoverable there.
+                bool permanent = (src.Capabilities & StorageCapabilities.OpenWithShell) != 0;
+                await src.DeleteAsync([item.Path], permanent, ct).ConfigureAwait(false);
             }
             catch (StorageException ex)
             {
@@ -264,17 +280,25 @@ public sealed class FileOperationService : IFileOperationService
     private async Task<string?> TransferFileAsync(FileOperation op, ITransferExecutor executor, IStorageProvider src, IStorageProvider dst,
         StorageItem file, string folder, bool inPlaceCopy, CancellationToken ct)
     {
+        await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         long size = file.Size ?? 0;
+        string name = TransferName(src, file);
         string target = inPlaceCopy
-            ? await UniqueNameAsync(dst, folder, file.Name, copySuffix: true, ct).ConfigureAwait(false)
-            : dst.CombinePath(folder, file.Name);
+            ? await UniqueNameAsync(dst, folder, name, copySuffix: true, ct).ConfigureAwait(false)
+            : dst.CombinePath(folder, name);
         bool overwrite = false;
 
         if (!inPlaceCopy && await dst.GetItemAsync(target, ct).ConfigureAwait(false) is { } existing)
         {
+            if (op.Options.SkipIdentical && !existing.IsContainer && existing.Size == file.Size && file.Size is not null)
+            {
+                op.FileSkipped(size); // retry: this one already arrived
+                return target;
+            }
+
             var resolution = existing.IsContainer
                 ? ConflictResolution.KeepBoth
-                : await DecideAsync(op, file, existing, dst.GetDisplayName(folder), ct).ConfigureAwait(false);
+                : op.Options.Conflict ?? await DecideAsync(op, file, existing, dst.GetDisplayName(folder), ct).ConfigureAwait(false);
 
             switch (resolution)
             {
@@ -282,7 +306,7 @@ public sealed class FileOperationService : IFileOperationService
                     op.FileSkipped(size);
                     return null;
                 case ConflictResolution.KeepBoth:
-                    target = await UniqueNameAsync(dst, folder, file.Name, copySuffix: false, ct).ConfigureAwait(false);
+                    target = await UniqueNameAsync(dst, folder, name, copySuffix: false, ct).ConfigureAwait(false);
                     break;
                 case ConflictResolution.Replace:
                     if (src.Id == dst.Id && string.Equals(existing.Path, file.Path, StringComparison.OrdinalIgnoreCase))
@@ -298,36 +322,52 @@ public sealed class FileOperationService : IFileOperationService
         op.SetCurrent(file.Name);
         for (int attempt = 1; ; attempt++)
         {
+            var progress = new FileProgress(op);
             long reported = 0;
             try
             {
-                await executor.CopyFileAsync(src, file, dst, target, overwrite, delta =>
-                {
-                    reported += delta;
-                    op.AddTransferred(delta);
-                }, ct).ConfigureAwait(false);
+                await executor.CopyFileAsync(src, file, dst, target, overwrite, progress, ct).ConfigureAwait(false);
                 op.FileDone();
                 return target;
             }
             catch (OperationCanceledException)
             {
-                op.AddTransferred(-reported);
+                op.AddTransferred(-progress.Reported);
                 throw;
             }
-            catch (StorageException ex) when (attempt < MaxAttempts && ex.Kind is StorageErrorKind.InUse or StorageErrorKind.Unavailable)
+            catch (StorageException ex) when (attempt < MaxAttempts && ex.Kind is StorageErrorKind.InUse or StorageErrorKind.Unavailable or StorageErrorKind.Throttled)
             {
-                op.AddTransferred(-reported);
+                op.AddTransferred(-progress.Reported);
                 _logger.LogInformation("Retrying {File} after transient error: {Message}", file.Name, ex.Message);
                 await Task.Delay(TimeSpan.FromMilliseconds(300 * Math.Pow(2, attempt - 1)), ct).ConfigureAwait(false);
             }
             catch (StorageException ex)
             {
+                reported = progress.Reported;
                 op.AddTransferred(size - reported); // keep the progress bar honest: the file is "done" (failed)
                 op.FileDone();
                 op.AddError($"{file.Name}: {ex.Message}");
                 return null;
             }
         }
+    }
+
+    /// <summary>Per-file progress: feeds the operation totals and remembers what to roll back on retry.</summary>
+    private sealed class FileProgress(FileOperation op) : ITransferProgress
+    {
+        private long _reported;
+
+        public long Reported => Interlocked.Read(ref _reported);
+
+        public void Report(long bytes)
+        {
+            Interlocked.Add(ref _reported, bytes);
+            op.AddTransferred(bytes);
+        }
+
+        public ValueTask WaitIfPausedAsync(CancellationToken cancellationToken) => op.WaitIfPausedAsync(cancellationToken);
+
+        public void WaitIfPaused(CancellationToken cancellationToken) => op.WaitIfPaused(cancellationToken);
     }
 
     private async Task<ConflictResolution> DecideAsync(FileOperation op, StorageItem source, StorageItem existing, string folderName, CancellationToken ct)

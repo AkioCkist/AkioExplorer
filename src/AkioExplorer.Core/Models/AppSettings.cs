@@ -50,6 +50,9 @@ public sealed class AppSettings
     public bool RestoreLastLocations { get; set; } = true;
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;
     public int MaxSimultaneousOperations { get; set; } = 2;
+
+    /// <summary>Where "Download" saves files; empty = the Windows Downloads folder.</summary>
+    public string DownloadFolder { get; set; } = string.Empty;
     public List<FavoriteEntry> Favorites { get; set; } = new();
     public List<CloudAccount> CloudAccounts { get; set; } = new();
     public PaneState LeftPane { get; set; } = new();

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace AkioExplorer.Core.Models;
 
 public enum StorageItemKind
@@ -46,9 +48,12 @@ public sealed record StorageItem
     /// <summary>Optional human readable type (e.g. "Local Disk"). Files usually leave this null and the UI resolves it.</summary>
     public string? TypeDescription { get; init; }
 
+    [JsonIgnore]
     public bool IsContainer => Kind != StorageItemKind.File;
 
+    [JsonIgnore]
     public bool IsHidden => (Attributes & StorageItemAttributes.Hidden) != 0;
 
+    [JsonIgnore]
     public string Extension => Kind == StorageItemKind.File ? System.IO.Path.GetExtension(Name) : string.Empty;
 }

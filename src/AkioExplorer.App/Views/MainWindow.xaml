@@ -131,6 +131,35 @@
                             </AppBarButton.Flyout>
                         </AppBarButton>
                         <AppBarSeparator />
+                        <AppBarButton Label="Upload" IsEnabled="{x:Bind ViewModel.ActivePane.CanUpload, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Upload files or a folder from this PC into this cloud folder">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE898;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Files…" Click="OnUploadFiles">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Folder…" Click="OnUploadFolder">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarButton Label="Download" IsEnabled="{x:Bind ViewModel.ActivePane.CanDownload, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Download the selection to this PC">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE896;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="DownloadToDefault" Text="To Downloads" Click="OnDownloadDefault">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE896;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Choose folder…" Click="OnDownloadTo">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8DA;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarSeparator />
                         <AppBarButton x:Name="SortButton" Label="Sort" ToolTipService.ToolTip="Sort items">
                             <AppBarButton.Icon><FontIcon Glyph="&#xE8CB;" /></AppBarButton.Icon>
                             <AppBarButton.Flyout>
@@ -181,7 +210,13 @@
                     <Border Grid.Row="2" Padding="16,6,8,6" BorderThickness="0,1,0,0"
                             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                             Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.Operations.HasItems), Mode=OneWay}">
-                        <ScrollViewer MaxHeight="176" VerticalScrollBarVisibility="Auto">
+                        <Grid RowSpacing="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <HyperlinkButton Content="View all transfers" HorizontalAlignment="Right" Padding="8,2" FontSize="12" Click="OnViewTransfers" />
+                        <ScrollViewer Grid.Row="1" MaxHeight="176" VerticalScrollBarVisibility="Auto">
                             <ItemsControl ItemsSource="{x:Bind ViewModel.Operations.Items}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:OperationItemViewModel">
@@ -199,19 +234,32 @@
                                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"
                                                            ToolTipService.ToolTip="{x:Bind Detail, Mode=OneWay}" />
                                             </StackPanel>
-                                            <ProgressBar Grid.Column="2" VerticalAlignment="Center" Maximum="100"
+                                            <ProgressBar Grid.Column="2" VerticalAlignment="Center" Maximum="100" ShowPaused="{x:Bind IsPaused, Mode=OneWay}"
                                                          Value="{x:Bind Progress, Mode=OneWay}"
                                                          IsIndeterminate="{x:Bind IsIndeterminate, Mode=OneWay}"
                                                          ShowError="{x:Bind HasProblem, Mode=OneWay}" />
-                                            <Button Grid.Column="3" Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind CancelOrDismissCommand}"
-                                                    ToolTipService.ToolTip="Cancel or dismiss" AutomationProperties.Name="Cancel or dismiss">
-                                                <FontIcon Glyph="&#xE711;" FontSize="12" />
-                                            </Button>
+                                            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2">
+                                                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind PauseOrResumeCommand}"
+                                                        Visibility="{x:Bind conv:XamlHelpers.Visible(IsRunning), Mode=OneWay}"
+                                                        ToolTipService.ToolTip="{x:Bind PauseLabel, Mode=OneWay}" AutomationProperties.Name="{x:Bind PauseLabel, Mode=OneWay}">
+                                                    <FontIcon Glyph="{x:Bind PauseGlyph, Mode=OneWay}" FontSize="13" />
+                                                </Button>
+                                                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind RetryCommand}"
+                                                        Visibility="{x:Bind conv:XamlHelpers.Visible(CanRetry), Mode=OneWay}"
+                                                        ToolTipService.ToolTip="Retry (files that already arrived are skipped)" AutomationProperties.Name="Retry">
+                                                    <FontIcon Glyph="&#xE72C;" FontSize="13" />
+                                                </Button>
+                                                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind CancelOrDismissCommand}"
+                                                        ToolTipService.ToolTip="Cancel or dismiss" AutomationProperties.Name="Cancel or dismiss">
+                                                    <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                </Button>
+                                            </StackPanel>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
+                        </Grid>
                     </Border>
                 </Grid>
 

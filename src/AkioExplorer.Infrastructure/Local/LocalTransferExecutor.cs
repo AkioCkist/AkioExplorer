@@ -31,7 +31,7 @@ public sealed class LocalTransferExecutor : ITransferExecutor
         source.Id == LocalStorageProvider.ProviderId && destination.Id == LocalStorageProvider.ProviderId;
 
     public Task CopyFileAsync(IStorageProvider source, StorageItem file, IStorageProvider destination, string destinationPath,
-        bool overwrite, Action<long> onBytes, CancellationToken cancellationToken)
+        bool overwrite, ITransferProgress progress, CancellationToken cancellationToken)
     {
         return Task.Factory.StartNew(() =>
         {
@@ -45,19 +45,27 @@ public sealed class LocalTransferExecutor : ITransferExecutor
 
             long last = 0;
             int cancel = 0;
-            CopyProgressRoutine progress = (total, transferred, _, _, _, _, _, _, _) =>
+            CopyProgressRoutine callback = (total, transferred, _, _, _, _, _, _, _) =>
             {
                 long delta = transferred - last;
                 last = transferred;
-                if (delta != 0) onBytes(delta);
+                if (delta != 0) progress.Report(delta);
+                try
+                {
+                    progress.WaitIfPaused(cancellationToken); // the copy engine simply waits here while paused
+                }
+                catch (OperationCanceledException)
+                {
+                    return PROGRESS_CANCEL;
+                }
                 return cancellationToken.IsCancellationRequested ? PROGRESS_CANCEL : PROGRESS_CONTINUE;
             };
 
             uint flags = overwrite ? 0 : COPY_FILE_FAIL_IF_EXISTS;
             if ((file.Size ?? 0) >= UnbufferedThreshold) flags |= COPY_FILE_NO_BUFFERING;
 
-            bool ok = CopyFileEx(file.Path, destinationPath, progress, IntPtr.Zero, ref cancel, flags);
-            GC.KeepAlive(progress);
+            bool ok = CopyFileEx(file.Path, destinationPath, callback, IntPtr.Zero, ref cancel, flags);
+            GC.KeepAlive(callback);
             if (ok) return;
 
             int error = Marshal.GetLastWin32Error();

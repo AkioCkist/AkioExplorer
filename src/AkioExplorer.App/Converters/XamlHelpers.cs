@@ -14,6 +14,8 @@ public static class XamlHelpers
 
     public static bool Not(bool value) => !value;
 
+    public static bool HasText(string? value) => !string.IsNullOrEmpty(value);
+
     public static string SortGlyph(string column, SortField current, bool descending) =>
         column != current.ToString() ? string.Empty : descending ? "" : "";
 

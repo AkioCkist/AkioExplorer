@@ -148,9 +148,15 @@ public sealed class CloudAccountService : ICloudAccountService
 
     private string UniqueDisplayName(string serviceName, CloudIdentity identity)
     {
-        // "Google Drive" for the first account, "Google Drive (name@example.com)" when there are several.
-        bool another = Accounts.Any(a => a.DisplayName.StartsWith(serviceName, StringComparison.OrdinalIgnoreCase));
+        // "Google Drive name@example.com": service + account, so several accounts are told apart at a glance.
         string? who = identity.Email ?? identity.UserName;
-        return another && who is not null ? $"{serviceName} ({who})" : serviceName;
+        string name = string.IsNullOrWhiteSpace(who) ? serviceName : $"{serviceName} {who}";
+        var taken = Accounts.Select(a => a.DisplayName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!taken.Contains(name)) return name;
+        for (int n = 2; ; n++)
+        {
+            string candidate = $"{name} ({n})";
+            if (!taken.Contains(candidate)) return candidate;
+        }
     }
 }

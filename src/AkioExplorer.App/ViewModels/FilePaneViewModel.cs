@@ -696,6 +696,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         RequestMoveToOtherPaneCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanWriteHere));
         OnPropertyChanged(nameof(HasCopyableSelection));
+        OnPropertyChanged(nameof(IsRemote));
+        OnPropertyChanged(nameof(CanUpload));
+        OnPropertyChanged(nameof(CanDownload));
         OnPropertyChanged(nameof(HasMovableSelection));
         RenameCommand.NotifyCanExecuteChanged();
         DeleteCommand.NotifyCanExecuteChanged();
@@ -733,7 +736,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
         if ((Provider.Capabilities & StorageCapabilities.OpenWithShell) == 0)
         {
-            ShowError("Opening cloud files directly will be available with the transfer engine. Download the file first.");
+            if (Provider is IFileContentProvider) OpenRemoteRequested?.Invoke(this, vm.Item);
+            else ShowError("Files in this location can't be opened directly. Copy them to This PC first.");
             return;
         }
 
@@ -937,6 +941,16 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     /// <summary>Raised when the user asks to copy/move the selection to the other pane.</summary>
     public event EventHandler<OperationKind>? TransferToOtherPaneRequested;
+
+    /// <summary>Raised when a cloud file is opened: the shell downloads it to a cache and opens it.</summary>
+    public event EventHandler<StorageItem>? OpenRemoteRequested;
+
+    /// <summary>The pane shows a cloud account (no Windows shell behind it).</summary>
+    public bool IsRemote => Provider is not null && (Provider.Capabilities & StorageCapabilities.OpenWithShell) == 0;
+
+    public bool CanUpload => IsRemote && CanWriteHere;
+
+    public bool CanDownload => IsRemote && CanCopySelection();
 
     public bool HasCopyableSelection => CanCopySelection();
 

@@ -16,7 +16,7 @@ namespace AkioExplorer.Infrastructure.Local;
 /// Enumeration uses <see cref="FileSystemEnumerable{TResult}"/> (no FileSystemInfo allocations) on a background
 /// thread and streams pages through a channel.
 /// </summary>
-public sealed class LocalStorageProvider : IStorageProvider
+public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvider
 {
     public const string ProviderId = "local";
     private const int PageSize = 2000;
@@ -394,6 +394,63 @@ public sealed class LocalStorageProvider : IStorageProvider
             Marshal.FreeHGlobal(buffer);
         }
     }
+
+    // ---------------------------------------------------------------- content (upload source / download target)
+
+    public Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Task.FromResult<Stream>(new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+                1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan));
+        }
+        catch (Exception ex)
+        {
+            throw MapException(ex, file.Path);
+        }
+    }
+
+    /// <summary>Writes to "name.akiopart-xxxx" first and renames at the end, so a failed download never leaves a half file.</summary>
+    public async Task<StorageItem> WriteFileAsync(string parentPath, string name, Stream content, long length, bool overwrite, CancellationToken cancellationToken)
+    {
+        EnsureValidName(name);
+        if (IsRoot(parentPath))
+            throw new StorageException(StorageErrorKind.NotSupported, "Files can't be saved directly in This PC. Open a drive or folder first.");
+
+        string final = Path.Combine(parentPath, name);
+        if (!overwrite && (File.Exists(final) || Directory.Exists(final)))
+            throw new StorageException(StorageErrorKind.AlreadyExists, $"There's already an item named \"{name}\" here.");
+
+        string temp = final + ".akiopart-" + Guid.NewGuid().ToString("N")[..6];
+        try
+        {
+            await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 20,
+                             FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                if (length > 0) output.SetLength(length); // reserve space up front: less fragmentation, early "disk full"
+                await content.CopyToAsync(output, 1 << 20, cancellationToken).ConfigureAwait(false);
+                output.SetLength(output.Position);
+            }
+
+            if (overwrite && File.Exists(final)) File.SetAttributes(final, FileAttributes.Normal);
+            File.Move(temp, final, overwrite);
+        }
+        catch (Exception ex)
+        {
+            try { File.Delete(temp); } catch { /* best effort */ }
+            if (ex is OperationCanceledException or StorageException) throw;
+            throw MapException(ex, final);
+        }
+
+        return (await GetItemAsync(final, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>Local copies/moves go through <see cref="LocalTransferExecutor"/> (CopyFileEx / rename).</summary>
+    public Task<StorageItem?> CopyWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken) =>
+        Task.FromResult<StorageItem?>(null);
+
+    public Task<StorageItem?> MoveWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken) =>
+        Task.FromResult<StorageItem?>(null);
 
     // ---------------------------------------------------------------- search
 

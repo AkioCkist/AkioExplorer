@@ -6,6 +6,8 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AkioExplorer.CloudProviders.Auth;
+using AkioExplorer.CloudProviders.Http;
+using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Models;
 
@@ -15,11 +17,16 @@ namespace AkioExplorer.CloudProviders.OneDrive;
 /// OneDrive (personal and work/school) through the Microsoft Graph v1.0 REST API, path addressed
 /// ("/Documents/Report.docx"). Large folders are paged (999 items per request) and streamed to the UI.
 /// </summary>
-public sealed class OneDriveProvider : PathCloudProvider
+public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider
 {
     public const string ServiceName = "OneDrive";
     internal const string GraphBase = "https://graph.microsoft.com/v1.0";
     private const string Select = "id,name,size,lastModifiedDateTime,createdDateTime,folder,file,package,remoteItem,parentReference";
+
+    private const int SimpleUploadLimit = 4 * 1024 * 1024;
+    private const int ChunkSize = 32 * 320 * 1024; // 10 MiB; Graph requires multiples of 320 KiB
+    private const int MaxChunkAttempts = 5;
+    private static readonly TimeSpan CopyTimeout = TimeSpan.FromMinutes(30);
 
     private readonly HttpClient _http;
     private readonly IAccessTokenProvider _tokens;
@@ -174,6 +181,193 @@ public sealed class OneDriveProvider : PathCloudProvider
         string? name = root.TryGetProperty("displayName", out var d) ? d.GetString() : null;
         string? id = root.TryGetProperty("id", out var i) ? i.GetString() : null;
         return new CloudIdentity(mail ?? upn, name, id);
+    }
+
+    // ------------------------------------------------------------------ content
+
+    public override StorageCapabilities Capabilities => base.Capabilities | StorageCapabilities.ServerSideCopy;
+
+    /// <summary>"/drive/root:/A/B" form used in parentReference.path.</summary>
+    internal static string GraphParentPath(string parentPath) => "/drive/root:" + Normalize(parentPath);
+
+    public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
+    {
+        string path = Normalize(file.Path);
+        // /content answers with a redirect to a pre-authenticated download URL; HttpClient follows it and drops the
+        // Authorization header on the way (it must not be sent to the download host).
+        var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}/content"),
+            authorize: true, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            using (response) throw MapError(response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false), path);
+        }
+        return new OwnedStream(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), response);
+    }
+
+    public async Task<StorageItem> WriteFileAsync(string parentPath, string name, Stream content, long length, bool overwrite, CancellationToken cancellationToken)
+    {
+        EnsureValidName(name);
+        string path = CombinePath(parentPath, name);
+        string behavior = overwrite ? "replace" : "fail";
+
+        if (length >= 0 && length <= SimpleUploadLimit)
+        {
+            var data = new byte[length];
+            int read = await content.ReadFullAsync(data, cancellationToken).ConfigureAwait(false);
+            using var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Put,
+                    $"{GraphBase}{ItemRef(path)}/content?@microsoft.graph.conflictBehavior={behavior}")
+                { Content = new ByteArrayContent(data, 0, read) }, authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken)
+                .ConfigureAwait(false);
+            string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) throw MapError(response.StatusCode, text, path);
+            using var json = JsonDocument.Parse(text);
+            return ToItem(json.RootElement, path);
+        }
+
+        // Upload session: chunks go straight to the pre-authenticated upload URL, each retried on its own.
+        var sessionBody = new JsonObject { ["item"] = new JsonObject { ["@microsoft.graph.conflictBehavior"] = behavior } };
+        string uploadUrl;
+        using (var session = await SendAsync(HttpMethod.Post, $"{GraphBase}{ItemRef(path)}/createUploadSession", sessionBody, cancellationToken, path)
+                   .ConfigureAwait(false))
+        {
+            uploadUrl = session!.RootElement.GetProperty("uploadUrl").GetString()!;
+        }
+
+        try
+        {
+            var buffer = new byte[ChunkSize];
+            long offset = 0;
+            while (true)
+            {
+                int read = await content.ReadFullAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0) throw new StorageException(StorageErrorKind.Unknown, $"The source of \"{name}\" ended early.");
+                using var done = await PutChunkAsync(uploadUrl, buffer, read, offset, length, path, cancellationToken).ConfigureAwait(false);
+                offset += read;
+                if (done is not null) return ToItem(done.RootElement, path);
+            }
+        }
+        catch
+        {
+            // Abandon the session so OneDrive doesn't keep the partial upload around.
+            try
+            {
+                using var cancel = new HttpRequestMessage(HttpMethod.Delete, uploadUrl);
+                using var _ = await _http.SendAsync(cancel, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+            throw;
+        }
+    }
+
+    private async Task<JsonDocument?> PutChunkAsync(string uploadUrl, byte[] buffer, int count, long offset, long total, string path, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Put, uploadUrl) { Content = new ByteArrayContent(buffer, 0, count) };
+            request.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + count - 1, total);
+            try
+            {
+                using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.Accepted) return null; // more chunks expected
+                if (response.IsSuccessStatusCode) return JsonDocument.Parse(text);
+                bool transient = (int)response.StatusCode >= 500 || response.StatusCode == HttpStatusCode.TooManyRequests;
+                if (!transient || attempt >= MaxChunkAttempts) throw MapError(response.StatusCode, text, path);
+            }
+            catch (HttpRequestException) when (attempt < MaxChunkAttempts)
+            {
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new StorageException(StorageErrorKind.Unavailable, "The upload to OneDrive was interrupted. Check your connection.", ex);
+            }
+            await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Graph copies asynchronously: start the job, then follow its monitor URL until it finishes.</summary>
+    public async Task<StorageItem?> CopyWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken)
+    {
+        string from = Normalize(source.Path);
+        string target = CombinePath(parentPath, name);
+        var body = new JsonObject { ["parentReference"] = new JsonObject { ["path"] = GraphParentPath(parentPath) }, ["name"] = name };
+
+        string monitor;
+        using (var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Post,
+                       $"{GraphBase}{ItemRef(from)}/copy?@microsoft.graph.conflictBehavior=fail") { Content = JsonContent.Create(body) },
+                   authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false))
+        {
+            if (response.StatusCode != HttpStatusCode.Accepted || response.Headers.Location is null)
+                throw MapError(response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false), from);
+            monitor = response.Headers.Location.AbsoluteUri;
+        }
+
+        var deadline = DateTimeOffset.UtcNow + CopyTimeout;
+        var delay = TimeSpan.FromMilliseconds(400);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 1.5, 5000));
+            using var status = await _http.GetAsync(monitor, cancellationToken).ConfigureAwait(false); // monitor URLs need no token
+            string text = await status.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!status.IsSuccessStatusCode && status.StatusCode != HttpStatusCode.Accepted) continue;
+            using var json = JsonDocument.Parse(string.IsNullOrWhiteSpace(text) ? "{}" : text);
+            var root = json.RootElement;
+            string state = root.TryGetProperty("status", out var s) ? s.GetString() ?? string.Empty : root.TryGetProperty("id", out _) ? "completed" : string.Empty;
+            if (state is "completed") return await GetItemAsync(target, cancellationToken).ConfigureAwait(false);
+            if (state is "failed")
+            {
+                string reason = root.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "";
+                throw new StorageException(StorageErrorKind.Unknown, $"OneDrive couldn't copy \"{source.Name}\". {reason}");
+            }
+        }
+
+        throw new StorageException(StorageErrorKind.Unavailable, $"OneDrive is still copying \"{source.Name}\". Check the folder later.");
+    }
+
+    public async Task<StorageItem?> MoveWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken)
+    {
+        string from = Normalize(source.Path);
+        var body = new JsonObject { ["parentReference"] = new JsonObject { ["path"] = GraphParentPath(parentPath) }, ["name"] = name };
+        using var json = await SendAsync(HttpMethod.Patch, $"{GraphBase}{ItemRef(from)}?@microsoft.graph.conflictBehavior=fail", body, cancellationToken, from)
+            .ConfigureAwait(false);
+        return ToItem(json!.RootElement, CombinePath(parentPath, name));
+    }
+
+    /// <summary>Sends with a bearer token; on 401 refreshes once and retries. Caller owns the response.</summary>
+    private async Task<HttpResponseMessage> SendRawAsync(Func<HttpRequestMessage> build, bool authorize, HttpCompletionOption completion,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            var request = build();
+            if (authorize)
+            {
+                string token = await _tokens.GetAccessTokenAsync(cancellationToken, forceRefresh: attempt > 0).ConfigureAwait(false);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await _http.SendAsync(request, completion, cancellationToken).ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                request.Dispose();
+                throw new StorageException(StorageErrorKind.Unavailable, "Can't reach OneDrive. Check your internet connection.", ex);
+            }
+
+            if (response.StatusCode == HttpStatusCode.Unauthorized && authorize && attempt == 0)
+            {
+                response.Dispose();
+                request.Dispose();
+                continue;
+            }
+            return response;
+        }
     }
 
     // ------------------------------------------------------------------ helpers

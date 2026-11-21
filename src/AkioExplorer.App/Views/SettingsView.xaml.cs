@@ -24,6 +24,13 @@ public sealed partial class SettingsView : UserControl
 
     private static MainWindow Shell => App.Services.GetRequiredService<MainWindow>();
 
+    private async void OnChangeDownloadFolder(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.PickFolderAsync() is { } folder) ViewModel.SetDownloadFolder(folder);
+    }
+
+    private void OnResetDownloadFolder(object sender, RoutedEventArgs e) => ViewModel.SetDownloadFolder(null);
+
     private async void OnAddAccount(object sender, RoutedEventArgs e) => await Shell.AddCloudAccountFromSettingsAsync();
 
     private async void OnRenameAccount(object sender, RoutedEventArgs e)

@@ -25,6 +25,9 @@ public sealed partial class MainWindow : Window
     private readonly ILogger<MainWindow> _logger;
     private readonly CloudAccountsViewModel _cloud;
     private const string AddAccountTag = "add-cloud-account";
+    private const string TransfersTag = "transfers";
+    private const string HistoryTag = "transfer-history";
+    private NavigationViewItem? _transfersItem;
     private bool _initialized;
     private bool _syncingNav;
 
@@ -54,8 +57,11 @@ public sealed partial class MainWindow : Window
         RootGrid.Loaded += OnRootLoaded;
         RootGrid.SizeChanged += (_, _) => UpdateContentWidth();
         Nav.DisplayModeChanged += (_, _) => UpdateContentWidth();
-        Nav.PaneOpened += (_, _) => UpdateContentWidth();
-        Nav.PaneClosed += (_, _) => UpdateContentWidth();
+        // Size the content for the pane's target state as soon as the toggle starts (IsPaneOpen is already the new
+        // value). Waiting for PaneOpened/PaneClosed left the old width during the animation, then snapped the
+        // toolbar and re-flowed its "More" overflow at the end – the visible jerk.
+        Nav.PaneOpening += (_, _) => UpdateContentWidth();
+        Nav.PaneClosing += (_, _) => UpdateContentWidth();
         Activated += OnActivated;
         AppWindow.Closing += OnClosing;
 
@@ -68,6 +74,11 @@ public sealed partial class MainWindow : Window
         ViewModel.Favorites.CollectionChanged += (_, _) => BuildSidebar();
         ViewModel.Drives.CollectionChanged += (_, _) => BuildSidebar();
         _cloud.Changed += (_, _) => BuildSidebar();
+        ViewModel.Operations.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(OperationsViewModel.ActiveCount)) UpdateTransfersBadge();
+        };
+        ViewModel.RemoteOpenFailed += (_, failure) => DispatcherQueue.TryEnqueue(() => failure.Pane.ShowError(failure.Message));
         foreach (var pane in new[] { ViewModel.LeftPane, ViewModel.RightPane })
         {
             pane.AuthenticationExpired += (_, providerId) => _cloud.MarkNeedsReconnect(providerId);
@@ -109,6 +120,9 @@ public sealed partial class MainWindow : Window
         SavePlacement();
         ViewModel.SaveState();
         _settings.Flush();
+        // Jobs still running are kept as "Interrupted" in Recent transfers so they can be retried next time.
+        if (App.Services.GetService(typeof(Infrastructure.Settings.JsonTransferHistory)) is Infrastructure.Settings.JsonTransferHistory history)
+            history.RecordInterrupted();
     }
 
     private void RestorePlacement()
@@ -219,6 +233,13 @@ public sealed partial class MainWindow : Window
         Nav.MenuItems.Clear();
 
         Nav.MenuItems.Add(CreateNavItem("Home", "", MainViewModel.Home, "This PC: your folders and drives"));
+        _transfersItem = new NavigationViewItem { Content = "Transfer queue", Icon = new FontIcon { Glyph = "\uE896" }, Tag = TransfersTag };
+        ToolTipService.SetToolTip(_transfersItem, "Running and waiting copies, uploads and downloads");
+        Nav.MenuItems.Add(_transfersItem);
+        var recent = new NavigationViewItem { Content = "Recent transfers", Icon = new FontIcon { Glyph = "\uE81C" }, Tag = HistoryTag };
+        ToolTipService.SetToolTip(recent, "Finished, failed and interrupted transfers – retry from here");
+        Nav.MenuItems.Add(recent);
+        UpdateTransfersBadge();
 
         Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Favorites" });
         if (ViewModel.Favorites.Count == 0)
@@ -320,6 +341,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (args.InvokedItemContainer?.Tag is TransfersTag or HistoryTag)
+        {
+            ShowTransfers(history: args.InvokedItemContainer.Tag is HistoryTag);
+            return;
+        }
+
         if (args.InvokedItemContainer?.Tag is AddAccountTag)
         {
             await AddCloudAccountAsync();
@@ -390,8 +417,80 @@ public sealed partial class MainWindow : Window
 
     public Task DisconnectFromSettingsAsync(CloudAccountItem account) => DisconnectAsync(account);
 
+    private TransfersView? TransfersHost { get; set; }
+
+    private void UpdateTransfersBadge()
+    {
+        if (_transfersItem is null) return;
+        int count = ViewModel.Operations.ActiveCount;
+        _transfersItem.InfoBadge = count > 0 ? new InfoBadge { Value = count } : null;
+    }
+
+    private void OnViewTransfers(object sender, RoutedEventArgs e) => ShowTransfers(history: false);
+
+    private void ShowTransfers(bool history)
+    {
+        if (TransfersHost is null)
+        {
+            TransfersHost = new TransfersView();
+            ContentRoot.Children.Add(TransfersHost);
+        }
+        TransfersHost.Visibility = Visibility.Visible;
+        ExplorerHost.Visibility = Visibility.Collapsed;
+        if (SettingsHost is not null) SettingsHost.Visibility = Visibility.Collapsed;
+        if (history) TransfersHost.ShowHistory(); else TransfersHost.ShowQueue();
+        Nav.SelectedItem = Nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Tag as string == (history ? HistoryTag : TransfersTag));
+    }
+
+    // ------------------------------------------------------------------ upload / download
+
+    private async void OnUploadFiles(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+        picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var files = await picker.PickMultipleFilesAsync();
+        if (files is { Count: > 0 }) await UploadAsync(files.Select(f => f.Path));
+    }
+
+    private async void OnUploadFolder(object sender, RoutedEventArgs e)
+    {
+        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+        picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null) await UploadAsync([folder.Path]);
+    }
+
+    private async Task UploadAsync(IEnumerable<string> paths)
+    {
+        var items = await ((ClipboardService)App.Services.GetService(typeof(ClipboardService))!).ResolveLocalAsync(paths);
+        ViewModel.ActivePane.Transfer(OperationKind.Copy, "local", items);
+    }
+
+    private void OnDownloadDefault(object sender, RoutedEventArgs e) => ViewModel.DownloadSelection();
+
+    private async void OnDownloadTo(object sender, RoutedEventArgs e)
+    {
+        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+        picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null) ViewModel.DownloadSelection(folder.Path);
+    }
+
+    /// <summary>Folder picker for Settings (needs this window's handle).</summary>
+    public async Task<string?> PickFolderAsync()
+    {
+        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+        picker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        return (await picker.PickSingleFolderAsync())?.Path;
+    }
+
     private void ShowSettings()
     {
+        if (TransfersHost is not null) TransfersHost.Visibility = Visibility.Collapsed;
         if (SettingsHost is null)
         {
             SettingsHost = new SettingsView();
@@ -415,9 +514,9 @@ public sealed partial class MainWindow : Window
             NavigationViewDisplayMode.Compact => Nav.CompactPaneLength,
             _ => 0,
         };
-        double width = RootGrid.ActualWidth - pane - 1;
+        double width = Math.Floor(RootGrid.ActualWidth - pane - 1);
         if (width <= 0) return;
-        ContentRoot.Width = width;
+        if (width != ContentRoot.Width) ContentRoot.Width = width; // unchanged: skip re-laying out toolbar and lists
         SettingsHost?.SetAvailableWidth(width);
     }
 
@@ -426,6 +525,7 @@ public sealed partial class MainWindow : Window
         if (ExplorerHost.Visibility == Visibility.Visible) return;
         ExplorerHost.Visibility = Visibility.Visible;
         if (SettingsHost is not null) SettingsHost.Visibility = Visibility.Collapsed;
+        if (TransfersHost is not null) TransfersHost.Visibility = Visibility.Collapsed;
         SyncSidebarSelection();
     }
 

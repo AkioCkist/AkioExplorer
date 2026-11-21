@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Text.Json;
+using AkioExplorer.Core.Cloud;
 
 namespace AkioExplorer.CloudProviders;
 
@@ -13,11 +15,26 @@ public sealed class CloudAppRegistration
 
 /// <summary>
 /// OAuth app registrations (client ids) for each service. They are not user secrets: desktop apps are public clients.
-/// Sources, later wins: built-in defaults (none in source control) → %LocalAppData%\AkioExplorer\cloud-apps.json →
-/// environment variables. See docs/CLOUD-SETUP.md.
+/// Sources, later wins:
+/// 1. built into the build: <c>src/AkioExplorer.CloudProviders/cloud-apps.builtin.json</c> (git-ignored, embedded
+///    at compile time) – with it, end users just click a service and sign in in their browser;
+/// 2. <c>%LocalAppData%\AkioExplorer\cloud-apps.json</c> (written by the "Add cloud account" dialog);
+/// 3. environment variables.
+/// See docs/CLOUD-SETUP.md.
 /// </summary>
 public sealed class CloudAppsConfig
 {
+    internal const string BuiltInResourceName = "AkioExplorer.CloudApps.BuiltIn.json";
+
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+    };
+
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
     public CloudAppRegistration GoogleDrive { get; set; } = new();
 
     public CloudAppRegistration Dropbox { get; set; } = new();
@@ -29,19 +46,12 @@ public sealed class CloudAppsConfig
 
     public static CloudAppsConfig Load()
     {
-        var config = new CloudAppsConfig();
-        try
+        var config = LoadBuiltIn() ?? new CloudAppsConfig();
+        if (ReadFile() is { } fromFile)
         {
-            if (File.Exists(FilePath))
-            {
-                var fromFile = JsonSerializer.Deserialize<CloudAppsConfig>(File.ReadAllText(FilePath),
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-                if (fromFile is not null) config = fromFile;
-            }
-        }
-        catch (Exception)
-        {
-            // A malformed file must not stop the app; connectors simply report "not configured".
+            Merge(config.GoogleDrive, fromFile.GoogleDrive);
+            Merge(config.Dropbox, fromFile.Dropbox);
+            Merge(config.OneDrive, fromFile.OneDrive);
         }
 
         Override(config.GoogleDrive, "AKIO_GOOGLE_CLIENT_ID", "AKIO_GOOGLE_CLIENT_SECRET");
@@ -59,26 +69,57 @@ public sealed class CloudAppsConfig
         OneDrive = fresh.OneDrive;
     }
 
-    /// <summary>Writes an empty template so users have something to fill in.</summary>
-    public static void EnsureTemplate()
+    public CloudAppRegistration For(CloudProviderType type) => type switch
+    {
+        CloudProviderType.GoogleDrive => GoogleDrive,
+        CloudProviderType.Dropbox => Dropbox,
+        _ => OneDrive,
+    };
+
+    /// <summary>Stores one service's registration in the user's cloud-apps.json and applies it immediately.</summary>
+    public void Save(CloudProviderType type, string clientId, string? clientSecret)
+    {
+        var file = ReadFile() ?? new CloudAppsConfig();
+        var target = file.For(type);
+        target.ClientId = clientId.Trim();
+        target.ClientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret.Trim();
+
+        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+        File.WriteAllText(FilePath, JsonSerializer.Serialize(file, WriteOptions));
+        Reload();
+    }
+
+    private static CloudAppsConfig? LoadBuiltIn()
     {
         try
         {
-            if (File.Exists(FilePath)) return;
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, """
-                {
-                  // OAuth app registrations for cloud services. See docs/CLOUD-SETUP.md in the AkioExplorer repository.
-                  // Save, then choose the service again in "Add cloud account".
-                  "GoogleDrive": { "ClientId": "", "ClientSecret": "" },
-                  "Dropbox":     { "ClientId": "" },
-                  "OneDrive":    { "ClientId": "" }
-                }
-                """);
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(BuiltInResourceName);
+            return stream is null ? null : JsonSerializer.Deserialize<CloudAppsConfig>(stream, ReadOptions);
         }
         catch (Exception)
         {
+            return null;
         }
+    }
+
+    private static CloudAppsConfig? ReadFile()
+    {
+        try
+        {
+            return File.Exists(FilePath) ? JsonSerializer.Deserialize<CloudAppsConfig>(File.ReadAllText(FilePath), ReadOptions) : null;
+        }
+        catch (Exception)
+        {
+            // A malformed file must not stop the app; built-in ids (if any) still apply.
+            return null;
+        }
+    }
+
+    private static void Merge(CloudAppRegistration target, CloudAppRegistration? source)
+    {
+        if (source is null || !source.IsSet) return;
+        target.ClientId = source.ClientId;
+        target.ClientSecret = source.ClientSecret;
     }
 
     private static void Override(CloudAppRegistration target, string idVariable, string? secretVariable)

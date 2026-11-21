@@ -11,9 +11,12 @@ public interface ITransferExecutor
 {
     bool CanTransfer(IStorageProvider source, IStorageProvider destination);
 
-    /// <summary>Copies one file. Reports transferred byte deltas. Must leave no partial file on cancel/failure.</summary>
+    /// <summary>
+    /// Copies one file to <paramref name="destinationPath"/> (a <see cref="IStorageProvider.CombinePath"/> result).
+    /// Reports byte deltas and honours pause through <paramref name="progress"/>. Must leave no partial file on cancel/failure.
+    /// </summary>
     Task CopyFileAsync(IStorageProvider source, StorageItem file, IStorageProvider destination, string destinationPath,
-        bool overwrite, Action<long> onBytes, CancellationToken cancellationToken);
+        bool overwrite, ITransferProgress progress, CancellationToken cancellationToken);
 
     /// <summary>
     /// Instant move (rename) when both paths live on the same volume/account. Returns false if not possible,
@@ -33,7 +36,11 @@ public interface IFileOperationService
     IReadOnlyList<FileOperation> Operations { get; }
 
     /// <summary>Queues a copy/move. Returns immediately; work runs in the background with bounded concurrency.</summary>
-    FileOperation Enqueue(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination);
+    FileOperation Enqueue(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination,
+        TransferOptions? options = null);
+
+    /// <summary>Runs a finished/failed operation again; files that already arrived (same name and size) are skipped.</summary>
+    FileOperation Retry(OperationKind kind, string sourceProviderId, IReadOnlyList<StorageItem> items, StorageLocation destination);
 
     /// <summary>Raised (on a worker thread) when an operation is queued.</summary>
     event EventHandler<FileOperation>? OperationQueued;

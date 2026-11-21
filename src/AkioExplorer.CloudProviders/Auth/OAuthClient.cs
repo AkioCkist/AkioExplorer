@@ -203,9 +203,17 @@ public sealed class OAuthClient
         context.Response.Close();
     }
 
+    /// <summary>Opens the sign-in page in the user's default Windows browser (shell "open" on an https URL).</summary>
     private static Task OpenSystemBrowser(Uri uri)
     {
-        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            throw new OAuthException("browser_failed", $"Couldn't open your default browser: {ex.Message}");
+        }
         return Task.CompletedTask;
     }
 

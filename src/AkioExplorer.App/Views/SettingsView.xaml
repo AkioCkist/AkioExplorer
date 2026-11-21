@@ -84,6 +84,12 @@
                     <x:String>Keep both</x:String>
                 </ComboBox>
             </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xE896;" Header="Download folder" Description="{x:Bind ViewModel.DownloadFolderText, Mode=OneWay}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Change…" Click="OnChangeDownloadFolder" />
+                    <Button Content="Reset" Click="OnResetDownloadFolder" ToolTipService.ToolTip="Use the Windows Downloads folder" />
+                </StackPanel>
+            </controls:SettingRow>
             <controls:SettingRow Glyph="&#xE9F5;" Header="Simultaneous operations" Description="How many copy or move jobs run at the same time. Others wait in line.">
                 <NumberBox Minimum="1" Maximum="8" SpinButtonPlacementMode="Compact" MinWidth="120"
                            Value="{x:Bind ViewModel.MaxSimultaneousOperations, Mode=TwoWay}" AutomationProperties.Name="Simultaneous operations" />
