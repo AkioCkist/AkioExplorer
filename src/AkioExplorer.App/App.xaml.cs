@@ -1,0 +1,103 @@
+using AkioExplorer.App.Services;
+using AkioExplorer.App.ViewModels;
+using AkioExplorer.App.Views;
+using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Logic;
+using AkioExplorer.Core.Transfers;
+using AkioExplorer.Infrastructure.Local;
+using AkioExplorer.Infrastructure.Logging;
+using AkioExplorer.Infrastructure.Settings;
+using AkioExplorer.Infrastructure.Shell;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+
+namespace AkioExplorer.App;
+
+public partial class App : Application
+{
+    private ServiceProvider? _services;
+    private MainWindow? _window;
+    private ILogger<App>? _logger;
+
+    public App()
+    {
+        InitializeComponent();
+        UnhandledException += OnUnhandledException;
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            _logger?.LogError(e.Exception, "Unobserved task exception");
+            e.SetObserved();
+        };
+    }
+
+    public static IServiceProvider Services => ((App)Current)._services ?? throw new InvalidOperationException("Services not built");
+
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        _services = ConfigureServices();
+        _logger = _services.GetRequiredService<ILogger<App>>();
+        _logger.LogInformation("AkioExplorer starting");
+
+        _window = _services.GetRequiredService<MainWindow>();
+        _window.Activate();
+    }
+
+    private static ServiceProvider ConfigureServices()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.AddDebug();
+            builder.AddProvider(new FileLoggerProvider(AppPaths.LogFolder, System.Diagnostics.Debugger.IsAttached || Environment.GetEnvironmentVariable("AKIO_DEBUG_LOG") == "1" ? LogLevel.Debug : LogLevel.Information));
+        });
+
+        services.AddSingleton(DispatcherQueue.GetForCurrentThread());
+
+        // Infrastructure
+        services.AddSingleton<ISettingsService, JsonSettingsService>();
+        services.AddSingleton<IKnownFoldersService, KnownFoldersService>();
+        services.AddSingleton<IShellIconExtractor, ShellIconExtractor>();
+        services.AddSingleton<IShellActions, ShellActions>();
+        services.AddSingleton<IListingCache>(_ => new ListingCache(capacity: 64));
+
+        // Storage providers: cloud providers register here in Phase 3.
+        services.AddSingleton<LocalStorageProvider>();
+        services.AddSingleton<IStorageProvider>(sp => sp.GetRequiredService<LocalStorageProvider>());
+        services.AddSingleton<IStorageProviderRegistry, StorageProviderRegistry>();
+
+        // File operations engine (transfer executors per provider pair; cloud executors arrive in Phase 4)
+        services.AddSingleton<ITransferExecutor, LocalTransferExecutor>();
+        services.AddSingleton<IConflictResolver, ConflictResolver>();
+        services.AddSingleton<IFileOperationService, FileOperationService>();
+
+        // App services
+        services.AddSingleton<IconService>();
+        services.AddSingleton<DialogService>();
+        services.AddSingleton<FavoritesService>();
+        services.AddSingleton<ThemeService>();
+        services.AddSingleton<ClipboardService>();
+        services.AddSingleton<UndoService>();
+        services.AddSingleton<DragDropBroker>();
+        services.AddSingleton<OperationsViewModel>();
+
+        // View models & views
+        services.AddTransient<FilePaneViewModel>();
+        services.AddSingleton<Func<FilePaneViewModel>>(sp => () => sp.GetRequiredService<FilePaneViewModel>());
+        services.AddSingleton<MainViewModel>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<MainWindow>();
+
+        return services.BuildServiceProvider();
+    }
+
+    private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        _logger?.LogCritical(e.Exception, "Unhandled UI exception");
+        // Keep the app alive for non-fatal UI errors; the failing operation already surfaced its own message.
+        e.Handled = true;
+    }
+}

@@ -1,0 +1,315 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="AkioExplorer.App.Controls.FilePane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:AkioExplorer.App.ViewModels"
+    xmlns:models="using:AkioExplorer.Core.Models"
+    xmlns:conv="using:AkioExplorer.App.Converters">
+
+    <UserControl.Resources>
+        <!-- Details row: compiled bindings, no converters, icon loads when the row is realised. -->
+        <DataTemplate x:Key="DetailsRowTemplate" x:DataType="vm:FileItemViewModel">
+            <Grid Height="32" Opacity="{x:Bind Opacity, Mode=OneWay}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="{x:Bind Columns.DateWidth, Mode=OneWay}" />
+                    <ColumnDefinition Width="{x:Bind Columns.TypeWidth, Mode=OneWay}" />
+                    <ColumnDefinition Width="{x:Bind Columns.SizeWidth, Mode=OneWay}" />
+                </Grid.ColumnDefinitions>
+                <Border x:Name="DropHighlight" x:Load="{x:Bind IsDropTarget, Mode=OneWay}" Grid.ColumnSpan="5" Margin="-8,1,-8,1"
+                        CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                        Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
+                <Image Source="{x:Bind Icon, Mode=OneWay}" Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"
+                           Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}" />
+                <TextBox Grid.Column="1" x:Name="RenameBox" x:Load="{x:Bind IsRenaming, Mode=OneWay}"
+                         Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         MinHeight="28" Height="28" Padding="8,3,8,0" Margin="-9,0,12,0" VerticalAlignment="Center"
+                         Loaded="OnRenameBoxLoaded" KeyDown="OnRenameBoxKeyDown" LostFocus="OnRenameBoxLostFocus" />
+                <TextBlock Grid.Column="2" Text="{x:Bind ModifiedText, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="3" Text="{x:Bind SecondaryText, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="4" Text="{x:Bind SizeText, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="GridTileTemplate" x:DataType="vm:FileItemViewModel">
+            <Grid Width="108" Height="116" Padding="6,8,6,4" RowSpacing="4" Opacity="{x:Bind Opacity, Mode=OneWay}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="48" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border x:Name="TileDropHighlight" x:Load="{x:Bind IsDropTarget, Mode=OneWay}" Grid.RowSpan="2" Margin="-6,-8,-6,-4"
+                        CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                        Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
+                <Image Source="{x:Bind LargeIcon, Mode=OneWay}" Width="48" Height="48" />
+                <StackPanel Grid.Row="1" Spacing="4">
+                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"
+                               TextTrimming="CharacterEllipsis" Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}" />
+                    <TextBox x:Name="TileRenameBox" x:Load="{x:Bind IsRenaming, Mode=OneWay}" FontSize="12" MinHeight="26" Padding="6,3,6,0"
+                             Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Loaded="OnRenameBoxLoaded" KeyDown="OnRenameBoxKeyDown" LostFocus="OnRenameBoxLostFocus" />
+                    <ProgressBar x:Name="DriveBar" x:Load="{x:Bind IsDrive}" Value="{x:Bind DriveUsage, Mode=OneWay}" Maximum="100" Margin="6,0" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid x:Name="Root" Background="Transparent">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <FlyoutBase.AttachedFlyout>
+            <MenuFlyout x:Name="BackgroundMenu">
+                <MenuFlyoutItem Text="Paste" Command="{x:Bind ViewModel.PasteCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+V">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE77F;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutSubItem Text="View">
+                    <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE890;" /></MenuFlyoutSubItem.Icon>
+                    <RadioMenuFlyoutItem x:Name="MenuViewDetails" Text="Details" GroupName="view" Click="OnMenuViewDetails" KeyboardAcceleratorTextOverride="Ctrl+Shift+6" />
+                    <RadioMenuFlyoutItem x:Name="MenuViewGrid" Text="Grid" GroupName="view" Click="OnMenuViewGrid" KeyboardAcceleratorTextOverride="Ctrl+Shift+2" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSubItem Text="Sort by">
+                    <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8CB;" /></MenuFlyoutSubItem.Icon>
+                    <RadioMenuFlyoutItem x:Name="MenuSortName" Text="Name" GroupName="sort" Click="OnMenuSort" Tag="Name" />
+                    <RadioMenuFlyoutItem x:Name="MenuSortDate" Text="Date modified" GroupName="sort" Click="OnMenuSort" Tag="Modified" />
+                    <RadioMenuFlyoutItem x:Name="MenuSortType" Text="Type" GroupName="sort" Click="OnMenuSort" Tag="Type" />
+                    <RadioMenuFlyoutItem x:Name="MenuSortSize" Text="Size" GroupName="sort" Click="OnMenuSort" Tag="Size" />
+                    <MenuFlyoutSeparator />
+                    <RadioMenuFlyoutItem x:Name="MenuSortAsc" Text="Ascending" GroupName="dir" Click="OnMenuSortDirection" Tag="Asc" />
+                    <RadioMenuFlyoutItem x:Name="MenuSortDesc" Text="Descending" GroupName="dir" Click="OnMenuSortDirection" Tag="Desc" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutItem Text="Refresh" Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F5">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="New folder" Command="{x:Bind ViewModel.NewFolderCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+N">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8F4;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="MenuPinCurrent" Text="Pin to Favorites" Command="{x:Bind ViewModel.ToggleFavoriteCommand, Mode=OneWay}">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Open in other pane" Click="OnOpenInOtherPane">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A4;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuBgExplorer" Text="Open in File Explorer" Command="{x:Bind ViewModel.RevealInExplorerCommand, Mode=OneWay}">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEC50;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="MenuBgProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Alt+Enter">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;" /></MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+        </FlyoutBase.AttachedFlyout>
+
+        <!-- Active pane indicator (dual-pane only) -->
+        <Rectangle Height="2" VerticalAlignment="Top" Margin="12,0" RadiusX="1" RadiusY="1"
+                   Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                   Opacity="{x:Bind conv:XamlHelpers.ActiveIndicatorOpacity(ViewModel.ShowActiveIndicator, ViewModel.IsActive), Mode=OneWay}" />
+
+        <!-- Navigation bar: history buttons, breadcrumb / address box, filter -->
+        <Grid Grid.Row="0" Padding="{StaticResource PaneBarPadding}" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="FilterColumn" Width="240" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Orientation="Horizontal" Spacing="2">
+                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind ViewModel.GoBackCommand, Mode=OneWay}"
+                        ToolTipService.ToolTip="Back (Alt+Left)" AutomationProperties.Name="Back">
+                    <FontIcon Glyph="&#xE72B;" FontSize="14" />
+                </Button>
+                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind ViewModel.GoForwardCommand, Mode=OneWay}"
+                        ToolTipService.ToolTip="Forward (Alt+Right)" AutomationProperties.Name="Forward">
+                    <FontIcon Glyph="&#xE72A;" FontSize="14" />
+                </Button>
+                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind ViewModel.GoUpCommand, Mode=OneWay}"
+                        ToolTipService.ToolTip="Up to parent folder (Alt+Up)" AutomationProperties.Name="Up">
+                    <FontIcon Glyph="&#xE74A;" FontSize="14" />
+                </Button>
+                <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}"
+                        ToolTipService.ToolTip="Refresh (F5)" AutomationProperties.Name="Refresh">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                </Button>
+            </StackPanel>
+
+            <Grid x:Name="AddressHost" Grid.Column="1" Height="32" CornerRadius="{ThemeResource ControlCornerRadius}"
+                  Background="{ThemeResource ControlFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                  BorderThickness="1" Tapped="OnAddressTapped" ToolTipService.ToolTip="Click to type a path (Ctrl+L)">
+                <BreadcrumbBar x:Name="Crumbs" ItemsSource="{x:Bind ViewModel.Breadcrumb, Mode=OneWay}" ItemClicked="OnCrumbClicked"
+                               VerticalAlignment="Center" Margin="6,0,6,0" />
+                <AutoSuggestBox x:Name="AddressBox" Visibility="Collapsed" VerticalAlignment="Center" BorderThickness="0" Margin="-1"
+                                QuerySubmitted="OnAddressSubmitted" TextChanged="OnAddressTextChanged" KeyDown="OnAddressKeyDown"
+                                LostFocus="OnAddressLostFocus" AutomationProperties.Name="Address" UpdateTextOnSelect="True" />
+            </Grid>
+
+            <AutoSuggestBox x:Name="FilterBox" Grid.Column="2" VerticalAlignment="Center"
+                            PlaceholderText="{x:Bind ViewModel.FilterPlaceholder, Mode=OneWay}"
+                            Text="{x:Bind ViewModel.FilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            QueryIcon="Find" QuerySubmitted="OnFilterSubmitted" KeyDown="OnFilterKeyDown"
+                            ToolTipService.ToolTip="Type to filter this folder. Press Enter to search subfolders too. (Ctrl+F)"
+                            AutomationProperties.Name="Filter and search" />
+        </Grid>
+
+        <InfoBar Grid.Row="1" Margin="8,0,8,6" IsClosable="True"
+                 Severity="{x:Bind conv:XamlHelpers.Severity(ViewModel.IsMessageError), Mode=OneWay}"
+                 IsOpen="{x:Bind ViewModel.IsErrorOpen, Mode=TwoWay}" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}" />
+
+        <!-- Column headers (details view) -->
+        <Grid x:Name="ColumnHeader" Grid.Row="2" x:Load="{x:Bind ViewModel.IsDetailsView, Mode=OneWay}" Margin="4,0,16,0" Padding="0,0,0,2"
+              BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="28" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="{x:Bind ViewModel.Columns.DateWidth, Mode=OneWay}" />
+                <ColumnDefinition Width="{x:Bind ViewModel.Columns.TypeWidth, Mode=OneWay}" />
+                <ColumnDefinition Width="{x:Bind ViewModel.Columns.SizeWidth, Mode=OneWay}" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.ColumnSpan="2" Style="{StaticResource ColumnHeaderButtonStyle}" Click="OnHeaderClick" Tag="Name">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Name" />
+                    <FontIcon FontSize="10" Glyph="{x:Bind conv:XamlHelpers.SortGlyph('Name', ViewModel.SortField, ViewModel.SortDescending), Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="2" Style="{StaticResource ColumnHeaderButtonStyle}" Click="OnHeaderClick" Tag="Modified">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Date modified" />
+                    <FontIcon FontSize="10" Glyph="{x:Bind conv:XamlHelpers.SortGlyph('Modified', ViewModel.SortField, ViewModel.SortDescending), Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="3" Style="{StaticResource ColumnHeaderButtonStyle}" Click="OnHeaderClick" Tag="Type">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="{x:Bind ViewModel.SecondaryColumnHeader, Mode=OneWay}" />
+                    <FontIcon FontSize="10" Glyph="{x:Bind conv:XamlHelpers.SortGlyph('Type', ViewModel.SortField, ViewModel.SortDescending), Mode=OneWay}" />
+                </StackPanel>
+            </Button>
+            <Button Grid.Column="4" Style="{StaticResource ColumnHeaderButtonStyle}" HorizontalContentAlignment="Right" Click="OnHeaderClick" Tag="Size">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontSize="10" Glyph="{x:Bind conv:XamlHelpers.SortGlyph('Size', ViewModel.SortField, ViewModel.SortDescending), Mode=OneWay}" />
+                    <TextBlock Text="Size" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Content -->
+        <!-- Drop target is the host, not the ListView: ListView swallows drops between lists for its own reordering. -->
+        <Grid x:Name="ContentHost" Grid.Row="3" Background="Transparent" AllowDrop="True"
+              DragEnter="OnListDragEnter" DragOver="OnListDragOver" DragLeave="OnListDragLeave" Drop="OnListDrop">
+            <FlyoutBase.AttachedFlyout>
+                <MenuFlyout x:Name="ItemMenu">
+                    <MenuFlyoutItem x:Name="MenuOpen" Text="Open" FontWeight="SemiBold" Command="{x:Bind ViewModel.OpenSelectedCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Enter">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuOpenOther" Text="Open in other pane" Click="OnOpenInOtherPane">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A4;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuOpenWith" Text="Open with…" Command="{x:Bind ViewModel.OpenWithCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE7AC;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Cut" Command="{x:Bind ViewModel.CutCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+X">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C6;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem Text="Copy" Command="{x:Bind ViewModel.CopyCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+C">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuCopyOther" Text="Copy to other pane" Command="{x:Bind ViewModel.RequestCopyToOtherPaneCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xF413;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuMoveOther" Text="Move to other pane" Command="{x:Bind ViewModel.RequestMoveToOtherPaneCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8DE;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Rename" Command="{x:Bind ViewModel.RenameCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F2">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AC;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem Text="Delete" Command="{x:Bind ViewModel.DeleteCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Del">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem x:Name="MenuPinItem" Text="Pin to Favorites" Command="{x:Bind ViewModel.ToggleFavoriteCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuReveal" Text="Show in File Explorer" Command="{x:Bind ViewModel.RevealInExplorerCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEC50;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Alt+Enter">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                </MenuFlyout>
+            </FlyoutBase.AttachedFlyout>
+
+            <ListView x:Name="DetailsList" x:Load="{x:Bind ViewModel.IsDetailsView, Mode=OneWay}"
+                      ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
+                      ItemTemplate="{StaticResource DetailsRowTemplate}"
+                      ItemContainerStyle="{StaticResource FileRowContainerStyle}"
+                      SelectionMode="Extended" IsItemClickEnabled="False" Padding="0,2,0,8"
+                      CanDragItems="True" DragItemsStarting="OnDragItemsStarting" DragItemsCompleted="OnDragItemsCompleted"
+                      AutomationProperties.Name="Files"
+                      SelectionChanged="OnListSelectionChanged" DoubleTapped="OnListDoubleTapped"
+                      PreviewKeyDown="OnListPreviewKeyDown" CharacterReceived="OnListCharacterReceived"
+                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested" />
+
+            <GridView x:Name="TilesGrid" x:Load="{x:Bind ViewModel.IsGridView, Mode=OneWay}"
+                      ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
+                      ItemTemplate="{StaticResource GridTileTemplate}"
+                      ItemContainerStyle="{StaticResource FileTileContainerStyle}"
+                      SelectionMode="Extended" IsItemClickEnabled="False" Padding="10,6,10,8"
+                      CanDragItems="True" DragItemsStarting="OnDragItemsStarting" DragItemsCompleted="OnDragItemsCompleted"
+                      AutomationProperties.Name="Files"
+                      SelectionChanged="OnListSelectionChanged" DoubleTapped="OnListDoubleTapped"
+                      PreviewKeyDown="OnListPreviewKeyDown" CharacterReceived="OnListCharacterReceived"
+                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested" />
+
+            <ProgressBar VerticalAlignment="Top" IsIndeterminate="True" Margin="12,0"
+                         Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.IsLoading), Mode=OneWay}" />
+            <ProgressBar VerticalAlignment="Top" IsIndeterminate="True" Margin="12,0" ShowPaused="False"
+                         Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.IsSearching), Mode=OneWay}" />
+
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" IsHitTestVisible="False"
+                        Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.IsEmpty), Mode=OneWay}">
+                <FontIcon Glyph="&#xE8B7;" FontSize="40" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock Text="{x:Bind ViewModel.EmptyText, Mode=OneWay}" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="320"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Status bar -->
+        <Grid Grid.Row="4" Padding="14,2,8,4" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
+            <TextBlock Grid.Column="1" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.SelectionText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                <ToggleButton x:Name="DetailsToggle" Width="32" Height="28" Padding="0" Click="OnDetailsToggleClick" ToolTipService.ToolTip="Details (Ctrl+Shift+6)"
+                              AutomationProperties.Name="Details view" Background="Transparent" BorderThickness="0">
+                    <FontIcon Glyph="&#xE8FD;" FontSize="14" />
+                </ToggleButton>
+                <ToggleButton x:Name="GridToggle" Width="32" Height="28" Padding="0" Click="OnGridToggleClick" ToolTipService.ToolTip="Grid (Ctrl+Shift+2)"
+                              AutomationProperties.Name="Grid view" Background="Transparent" BorderThickness="0">
+                    <FontIcon Glyph="&#xF0E2;" FontSize="14" />
+                </ToggleButton>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="AkioExplorer.App.Views.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:AkioExplorer.App.Controls"
+    xmlns:views="using:AkioExplorer.App.Views"
+    xmlns:vm="using:AkioExplorer.App.ViewModels"
+    xmlns:conv="using:AkioExplorer.App.Converters"
+    Title="AkioExplorer">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="RootGrid" KeyboardAcceleratorPlacementMode="Hidden">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- App-wide shortcuts (File Explorer conventions). List-scoped keys (Enter, Del, F2, Backspace) live in FilePane. -->
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Modifiers="Menu" Key="Left" Invoked="OnBackAccelerator" />
+            <KeyboardAccelerator Modifiers="Menu" Key="Right" Invoked="OnForwardAccelerator" />
+            <KeyboardAccelerator Modifiers="Menu" Key="Up" Invoked="OnUpAccelerator" />
+            <KeyboardAccelerator Key="F5" Invoked="OnRefreshAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="R" Invoked="OnRefreshAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="L" Invoked="OnAddressAccelerator" />
+            <KeyboardAccelerator Modifiers="Menu" Key="D" Invoked="OnAddressAccelerator" />
+            <KeyboardAccelerator Key="F4" Invoked="OnAddressAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="F" Invoked="OnFilterAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="E" Invoked="OnFilterAccelerator" />
+            <KeyboardAccelerator Key="F3" Invoked="OnFilterAccelerator" />
+            <KeyboardAccelerator Key="F6" Invoked="OnSwitchPaneAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="N" Invoked="OnNewFolderAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="D" Invoked="OnDualPaneAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="C" Invoked="OnCopyPathAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="Number6" Invoked="OnDetailsAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="Number2" Invoked="OnGridAccelerator" />
+            <KeyboardAccelerator Modifiers="Menu" Key="Enter" Invoked="OnPropertiesAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="Number1" Invoked="OnFocusSidebarAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="Z" Invoked="OnUndoAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="C" Invoked="OnCopyAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="X" Invoked="OnCutAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="V" Invoked="OnPasteAccelerator" />
+        </Grid.KeyboardAccelerators>
+
+        <!-- Custom title bar (draggable region) -->
+        <Grid x:Name="AppTitleBar" Height="32" Padding="16,0,0,0" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <FontIcon Glyph="&#xE753;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+            <TextBlock x:Name="TitleText" Grid.Column="1" Text="AkioExplorer" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+        </Grid>
+
+        <NavigationView x:Name="Nav" Grid.Row="1"
+                        PaneDisplayMode="Left" IsBackButtonVisible="Collapsed" IsSettingsVisible="True"
+                        IsTitleBarAutoPaddingEnabled="False" OpenPaneLength="240"
+                        CompactModeThresholdWidth="760" ExpandedModeThresholdWidth="1000"
+                        ItemInvoked="OnNavItemInvoked">
+            <Grid x:Name="ContentRoot">
+                <Grid x:Name="ExplorerHost">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Toolbar: commands act on the active pane. Only working commands are shown. -->
+                    <CommandBar x:Name="Toolbar" DefaultLabelPosition="Right" HorizontalAlignment="Left" Background="Transparent"
+                                Margin="8,4,8,0" IsDynamicOverflowEnabled="True">
+                        <AppBarButton Label="New folder" Command="{x:Bind ViewModel.ActivePane.NewFolderCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="New folder (Ctrl+Shift+N)">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8F4;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarSeparator />
+                        <AppBarButton Label="Cut" Command="{x:Bind ViewModel.ActivePane.CutCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Cut (Ctrl+X)" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8C6;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton Label="Copy" Command="{x:Bind ViewModel.ActivePane.CopyCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Copy (Ctrl+C)" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8C8;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton Label="Paste" Command="{x:Bind ViewModel.ActivePane.PasteCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Paste (Ctrl+V)" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE77F;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton Label="Rename" Command="{x:Bind ViewModel.ActivePane.RenameCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Rename (F2)" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8AC;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton Label="Delete" Command="{x:Bind ViewModel.ActivePane.DeleteCommand, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Delete to Recycle Bin (Del) · Shift+Del deletes permanently" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE74D;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarButton Label="Undo" Command="{x:Bind ViewModel.UndoCommand}"
+                                      ToolTipService.ToolTip="Undo (Ctrl+Z)" LabelPosition="Collapsed" Width="44" MinWidth="44">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE7A7;" /></AppBarButton.Icon>
+                        </AppBarButton>
+                        <AppBarSeparator />
+                        <AppBarButton Label="Copy to" IsEnabled="{x:Bind ViewModel.ActivePane.HasCopyableSelection, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Copy the selection to another folder">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xF413;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Other pane" Click="OnCopyToOtherPane">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A4;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Choose folder…" Click="OnCopyToFolder">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8DA;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarButton Label="Move to" IsEnabled="{x:Bind ViewModel.ActivePane.HasMovableSelection, Mode=OneWay}"
+                                      ToolTipService.ToolTip="Move the selection to another folder">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8DE;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Other pane" Click="OnMoveToOtherPane">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A4;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Choose folder…" Click="OnMoveToFolder">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8DA;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarSeparator />
+                        <AppBarButton x:Name="SortButton" Label="Sort" ToolTipService.ToolTip="Sort items">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE8CB;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout Opening="OnSortMenuOpening">
+                                    <RadioMenuFlyoutItem x:Name="SortName" Text="Name" GroupName="sort" Tag="Name" Click="OnSortFieldClick" />
+                                    <RadioMenuFlyoutItem x:Name="SortDate" Text="Date modified" GroupName="sort" Tag="Modified" Click="OnSortFieldClick" />
+                                    <RadioMenuFlyoutItem x:Name="SortType" Text="Type" GroupName="sort" Tag="Type" Click="OnSortFieldClick" />
+                                    <RadioMenuFlyoutItem x:Name="SortSize" Text="Size" GroupName="sort" Tag="Size" Click="OnSortFieldClick" />
+                                    <MenuFlyoutSeparator />
+                                    <RadioMenuFlyoutItem x:Name="SortAsc" Text="Ascending" GroupName="dir" Tag="Asc" Click="OnSortDirectionClick" />
+                                    <RadioMenuFlyoutItem x:Name="SortDesc" Text="Descending" GroupName="dir" Tag="Desc" Click="OnSortDirectionClick" />
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarButton x:Name="ViewButton" Label="View" ToolTipService.ToolTip="Change view">
+                            <AppBarButton.Icon><FontIcon Glyph="&#xE890;" /></AppBarButton.Icon>
+                            <AppBarButton.Flyout>
+                                <MenuFlyout Opening="OnViewMenuOpening">
+                                    <RadioMenuFlyoutItem x:Name="ViewDetails" Text="Details" GroupName="view" Click="OnViewDetailsClick" KeyboardAcceleratorTextOverride="Ctrl+Shift+6">
+                                        <RadioMenuFlyoutItem.Icon><FontIcon Glyph="&#xE8FD;" /></RadioMenuFlyoutItem.Icon>
+                                    </RadioMenuFlyoutItem>
+                                    <RadioMenuFlyoutItem x:Name="ViewGrid" Text="Grid" GroupName="view" Click="OnViewGridClick" KeyboardAcceleratorTextOverride="Ctrl+Shift+2">
+                                        <RadioMenuFlyoutItem.Icon><FontIcon Glyph="&#xF0E2;" /></RadioMenuFlyoutItem.Icon>
+                                    </RadioMenuFlyoutItem>
+                                </MenuFlyout>
+                            </AppBarButton.Flyout>
+                        </AppBarButton>
+                        <AppBarSeparator />
+                        <AppBarToggleButton Label="Dual pane" IsChecked="{x:Bind ViewModel.IsDualPane, Mode=TwoWay}"
+                                            ToolTipService.ToolTip="Dual pane (Ctrl+Shift+D) · F6 switches pane">
+                            <AppBarToggleButton.Icon><FontIcon Glyph="&#xE8A4;" /></AppBarToggleButton.Icon>
+                        </AppBarToggleButton>
+                    </CommandBar>
+
+                    <Grid x:Name="PanesGrid" Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition x:Name="RightColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <controls:FilePane x:Name="LeftPaneView" ViewModel="{x:Bind ViewModel.LeftPane}" />
+                        <Rectangle x:Name="PaneDivider" Grid.Column="1" Width="1" Visibility="Collapsed"
+                                   Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <controls:FilePane x:Name="RightPaneView" Grid.Column="2" Visibility="Collapsed" ViewModel="{x:Bind ViewModel.RightPane}" />
+                    </Grid>
+
+                    <!-- Running copy / move operations (only operations longer than ~0.6 s appear) -->
+                    <Border Grid.Row="2" Padding="16,6,8,6" BorderThickness="0,1,0,0"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.Operations.HasItems), Mode=OneWay}">
+                        <ScrollViewer MaxHeight="176" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Operations.Items}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:OperationItemViewModel">
+                                        <Grid ColumnSpacing="12" Padding="0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="220" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind Title, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{x:Bind Detail, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"
+                                                           ToolTipService.ToolTip="{x:Bind Detail, Mode=OneWay}" />
+                                            </StackPanel>
+                                            <ProgressBar Grid.Column="2" VerticalAlignment="Center" Maximum="100"
+                                                         Value="{x:Bind Progress, Mode=OneWay}"
+                                                         IsIndeterminate="{x:Bind IsIndeterminate, Mode=OneWay}"
+                                                         ShowError="{x:Bind HasProblem, Mode=OneWay}" />
+                                            <Button Grid.Column="3" Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind CancelOrDismissCommand}"
+                                                    ToolTipService.ToolTip="Cancel or dismiss" AutomationProperties.Name="Cancel or dismiss">
+                                                <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>

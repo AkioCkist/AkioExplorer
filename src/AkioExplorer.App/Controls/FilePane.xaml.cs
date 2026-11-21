@@ -1,0 +1,738 @@
+using System.ComponentModel;
+using AkioExplorer.App.Services;
+using AkioExplorer.App.ViewModels;
+using AkioExplorer.Core.Transfers;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Models;
+using Microsoft.UI.Input;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.ApplicationModel.DataTransfer.DragDrop;
+using Windows.System;
+using Windows.UI.Core;
+
+namespace AkioExplorer.App.Controls;
+
+/// <summary>
+/// Reusable file browser pane. Pure view logic: focus, selection sync, keyboard handling, menus.
+/// Everything that touches storage goes through <see cref="FilePaneViewModel"/>.
+/// </summary>
+public sealed partial class FilePane : UserControl
+{
+    public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
+        nameof(ViewModel), typeof(FilePaneViewModel), typeof(FilePane), new PropertyMetadata(null, OnViewModelChanged));
+
+    private bool _syncingSelection;
+    private string _typeAhead = string.Empty;
+    private DateTime _typeAheadAt;
+    private CancellationTokenSource? _suggestCts;
+    private readonly DragDropBroker _drag = App.Services.GetRequiredService<DragDropBroker>();
+    private readonly ClipboardService _clipboard = App.Services.GetRequiredService<ClipboardService>();
+    private FileItemViewModel? _dropTarget;
+    private readonly ILogger<FilePane> _log = App.Services.GetRequiredService<ILogger<FilePane>>();
+    private string? _externalDragRoot;
+
+    public FilePane()
+    {
+        InitializeComponent();
+        Root.AddHandler(PointerPressedEvent, new PointerEventHandler(OnRootPointerPressed), handledEventsToo: true);
+        Root.GotFocus += (_, _) => ViewModel?.RequestActivation();
+        SizeChanged += (_, e) =>
+        {
+            FilterColumn.Width = new GridLength(e.NewSize.Width < 700 ? 150 : 240);
+            ViewModel?.Columns.Update(e.NewSize.Width);
+        };
+    }
+
+    public FilePaneViewModel ViewModel
+    {
+        get => (FilePaneViewModel)GetValue(ViewModelProperty);
+        set => SetValue(ViewModelProperty, value);
+    }
+
+    private ListViewBase? ActiveList => (ListViewBase?)DetailsList ?? TilesGrid;
+
+    private static void OnViewModelChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var pane = (FilePane)d;
+        if (e.OldValue is FilePaneViewModel old)
+        {
+            old.SelectionRequested -= pane.OnSelectionRequested;
+            old.RenameRequested -= pane.OnRenameRequested;
+            old.FocusListRequested -= pane.OnFocusListRequested;
+            old.AddressEditRequested -= pane.OnAddressEditRequested;
+            old.FilterFocusRequested -= pane.OnFilterFocusRequested;
+            old.PropertyChanged -= pane.OnViewModelPropertyChanged;
+        }
+
+        if (e.NewValue is FilePaneViewModel vm)
+        {
+            vm.SelectionRequested += pane.OnSelectionRequested;
+            vm.RenameRequested += pane.OnRenameRequested;
+            vm.FocusListRequested += pane.OnFocusListRequested;
+            vm.AddressEditRequested += pane.OnAddressEditRequested;
+            vm.FilterFocusRequested += pane.OnFilterFocusRequested;
+            vm.PropertyChanged += pane.OnViewModelPropertyChanged;
+        }
+
+        pane.Bindings.Update();
+        pane.SyncViewToggles();
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(FilePaneViewModel.ViewMode))
+        {
+            SyncViewToggles();
+            // The other list was just created by x:Load; give it focus if this pane is active.
+            DispatcherQueue.TryEnqueue(() => { if (ViewModel.IsActive) FocusList(); });
+        }
+    }
+
+    private void SyncViewToggles()
+    {
+        if (ViewModel is null) return;
+        DetailsToggle.IsChecked = ViewModel.IsDetailsView;
+        GridToggle.IsChecked = ViewModel.IsGridView;
+    }
+
+    // ------------------------------------------------------------------ focus & selection
+
+    public void FocusList() => FocusList(attempts: 5);
+
+    private void FocusList(int attempts)
+    {
+        var list = ActiveList;
+        if (list is null) return;
+
+        object? target = list.SelectedItem ?? (list.Items.Count > 0 ? list.Items[0] : null);
+        if (target is null)
+        {
+            // An empty ListView isn't a tab stop by default; make it one so keys (Ctrl+V, Backspace…) reach this pane.
+            list.IsTabStop = true;
+            list.Focus(FocusState.Keyboard);
+            return;
+        }
+
+        if (list.ContainerFromItem(target) is Control container)
+        {
+            container.Focus(FocusState.Keyboard);
+            return;
+        }
+
+        // Rows not realised yet (first layout pass after a navigation): try again after layout.
+        if (attempts > 0)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FocusList(attempts - 1));
+        else
+            list.Focus(FocusState.Programmatic);
+    }
+
+    private void OnFocusListRequested(object? sender, EventArgs e) => FocusList();
+
+    private void OnSelectionRequested(object? sender, IReadOnlyList<FileItemViewModel> items)
+    {
+        var list = ActiveList;
+        if (list is null || items.Count == 0) return;
+
+        _syncingSelection = true;
+        try
+        {
+            if (items.Count == 1)
+            {
+                list.SelectedItem = items[0];
+            }
+            else
+            {
+                list.SelectedItems.Clear();
+                foreach (var item in items) list.SelectedItems.Add(item);
+            }
+        }
+        finally
+        {
+            _syncingSelection = false;
+        }
+
+        ViewModel.UpdateSelection(list.SelectedItems.OfType<FileItemViewModel>());
+        list.ScrollIntoView(items[0]);
+        if (ViewModel.IsActive) FocusItem(list, items[0], attempts: 3);
+    }
+
+    private void FocusItem(ListViewBase list, object item, int attempts)
+    {
+        if (list.ContainerFromItem(item) is Control container)
+        {
+            container.Focus(FocusState.Keyboard);
+            return;
+        }
+
+        // Container not realised yet (just scrolled into view): retry after layout.
+        if (attempts > 0)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FocusItem(list, item, attempts - 1));
+    }
+
+    private void OnListSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingSelection) return;
+        ViewModel.UpdateSelection(((ListViewBase)sender).SelectedItems.OfType<FileItemViewModel>());
+    }
+
+    private void OnContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        // Lazy icons: only rows that are actually realised on screen request a shell icon.
+        if (!args.InRecycleQueue && args.Item is FileItemViewModel vm)
+            vm.EnsureIcon(sender is GridView ? IconSize.Large : IconSize.Small);
+    }
+
+    private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        ViewModel?.RequestActivation();
+        var props = e.GetCurrentPoint(this).Properties;
+        if (props.IsXButton1Pressed)
+        {
+            ViewModel?.GoBackCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (props.IsXButton2Pressed)
+        {
+            ViewModel?.GoForwardCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    // ------------------------------------------------------------------ list input
+
+    private static bool IsKeyDown(VirtualKey key) =>
+        InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(CoreVirtualKeyStates.Down);
+
+    private async void OnListDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (e.OriginalSource is FrameworkElement { DataContext: FileItemViewModel vm } && !vm.IsRenaming)
+        {
+            e.Handled = true;
+            await ViewModel.OpenAsync(vm);
+        }
+    }
+
+    private void OnListPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) return; // inline rename owns the keyboard
+
+        bool shift = IsKeyDown(VirtualKey.Shift);
+        bool ctrl = IsKeyDown(VirtualKey.Control);
+        bool alt = IsKeyDown(VirtualKey.Menu);
+
+        switch (e.Key)
+        {
+            case VirtualKey.Enter when !ctrl && !alt:
+                ViewModel.OpenSelectedCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case VirtualKey.Back:
+                ViewModel.GoBackCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case VirtualKey.Delete:
+                if (shift) ViewModel.DeletePermanentlyCommand.Execute(null);
+                else ViewModel.DeleteCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case VirtualKey.F2:
+                ViewModel.RenameCommand.Execute(null);
+                e.Handled = true;
+                break;
+
+            case VirtualKey.Escape when ViewModel.FilterText.Length > 0 || ViewModel.IsSearchMode:
+                ViewModel.FilterText = string.Empty;
+                ViewModel.ExitSearch();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>Type-ahead: typing letters jumps to the matching item; repeating a letter cycles through matches.</summary>
+    private void OnListCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)
+    {
+        if (args.OriginalSource is TextBox || char.IsControl(args.Character)) return;
+        if (IsKeyDown(VirtualKey.Control) || IsKeyDown(VirtualKey.Menu)) return;
+        var list = (ListViewBase)sender;
+        var items = ViewModel.Items;
+        if (items.Count == 0) return;
+
+        var now = DateTime.UtcNow;
+        _typeAhead = (now - _typeAheadAt).TotalMilliseconds > 900 ? args.Character.ToString() : _typeAhead + args.Character;
+        _typeAheadAt = now;
+
+        bool cycling = _typeAhead.Length > 1 && _typeAhead.All(c => char.ToUpperInvariant(c) == char.ToUpperInvariant(_typeAhead[0]));
+        string needle = cycling ? _typeAhead[..1] : _typeAhead;
+        int current = list.SelectedIndex;
+        int start = cycling || _typeAhead.Length == 1 ? current + 1 : Math.Max(current, 0);
+
+        for (int i = 0; i < items.Count; i++)
+        {
+            var candidate = items[(start + i) % items.Count];
+            if (candidate.Name.StartsWith(needle, StringComparison.CurrentCultureIgnoreCase))
+            {
+                OnSelectionRequested(this, [candidate]);
+                break;
+            }
+        }
+        args.Handled = true;
+    }
+
+    // ------------------------------------------------------------------ inline rename
+
+    private void OnRenameRequested(object? sender, FileItemViewModel vm)
+    {
+        ActiveList?.ScrollIntoView(vm);
+    }
+
+    private void OnRenameBoxLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox box || box.DataContext is not FileItemViewModel vm) return;
+        box.Focus(FocusState.Keyboard);
+        // Select the name without the extension, like Explorer.
+        int dot = vm.IsContainer ? -1 : vm.EditName.LastIndexOf('.');
+        box.Select(0, dot > 0 ? dot : vm.EditName.Length);
+    }
+
+    private async void OnRenameBoxKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: FileItemViewModel vm }) return;
+        if (e.Key == VirtualKey.Enter)
+        {
+            e.Handled = true;
+            await ViewModel.CommitRenameAsync(vm);
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            e.Handled = true;
+            ViewModel.CancelRename(vm);
+        }
+    }
+
+    private async void OnRenameBoxLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: FileItemViewModel vm } && vm.IsRenaming)
+            await ViewModel.CommitRenameAsync(vm);
+    }
+
+    // ------------------------------------------------------------------ context menus
+
+    private void OnListContextRequested(UIElement sender, ContextRequestedEventArgs e)
+    {
+        var list = (ListViewBase)sender;
+        var element = e.OriginalSource as FrameworkElement;
+        var item = (element as SelectorItem)?.Content as FileItemViewModel ?? element?.DataContext as FileItemViewModel;
+
+        MenuFlyout menu;
+        if (item is not null)
+        {
+            if (!list.SelectedItems.Contains(item)) list.SelectedItem = item;
+            ConfigureItemMenu();
+            menu = ItemMenu;
+        }
+        else
+        {
+            list.SelectedItems.Clear();
+            ViewModel.UpdateSelection([]);
+            ConfigureBackgroundMenu();
+            menu = BackgroundMenu;
+        }
+
+        if (e.TryGetPosition(list, out var point))
+            menu.ShowAt(list, new FlyoutShowOptions { Position = point });
+        else
+            menu.ShowAt(element ?? list);
+        e.Handled = true;
+    }
+
+    private void ConfigureItemMenu()
+    {
+        var selected = ViewModel.SelectedItems;
+        bool single = selected.Count == 1;
+        bool singleFolder = single && selected[0].IsContainer;
+        bool local = ViewModel.Provider is { } p && (p.Capabilities & StorageCapabilities.OpenWithShell) != 0;
+
+        MenuOpenOther.Visibility = selected.Any(s => s.IsContainer) ? Visibility.Visible : Visibility.Collapsed;
+        bool dual = ViewModel.ShowActiveIndicator; // true only in dual-pane mode
+        MenuCopyOther.Visibility = dual ? Visibility.Visible : Visibility.Collapsed;
+        MenuMoveOther.Visibility = dual ? Visibility.Visible : Visibility.Collapsed;
+        MenuOpenWith.Visibility = single && !selected[0].IsContainer && local ? Visibility.Visible : Visibility.Collapsed;
+        MenuPinItem.Visibility = singleFolder ? Visibility.Visible : Visibility.Collapsed;
+        MenuPinItem.Text = ViewModel.IsSelectionFavorite ? "Unpin from Favorites" : "Pin to Favorites";
+        MenuReveal.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+        MenuProperties.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ConfigureBackgroundMenu()
+    {
+        MenuViewDetails.IsChecked = ViewModel.IsDetailsView;
+        MenuViewGrid.IsChecked = ViewModel.IsGridView;
+        MenuSortName.IsChecked = ViewModel.SortField == SortField.Name;
+        MenuSortDate.IsChecked = ViewModel.SortField == SortField.Modified;
+        MenuSortType.IsChecked = ViewModel.SortField == SortField.Type;
+        MenuSortSize.IsChecked = ViewModel.SortField == SortField.Size;
+        MenuSortAsc.IsChecked = !ViewModel.SortDescending;
+        MenuSortDesc.IsChecked = ViewModel.SortDescending;
+        MenuPinCurrent.Text = ViewModel.IsFavorite ? "Unpin from Favorites" : "Pin to Favorites";
+
+        bool local = ViewModel.Provider is { } p && (p.Capabilities & StorageCapabilities.OpenWithShell) != 0;
+        bool hasPath = ViewModel.Location is { Path.Length: > 0 };
+        MenuPinCurrent.Visibility = hasPath ? Visibility.Visible : Visibility.Collapsed;
+        MenuBgExplorer.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+        MenuBgProperties.Visibility = local && hasPath ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnMenuViewDetails(object sender, RoutedEventArgs e) => ViewModel.ViewMode = FileViewMode.Details;
+
+    private void OnMenuViewGrid(object sender, RoutedEventArgs e) => ViewModel.ViewMode = FileViewMode.Grid;
+
+    private void OnMenuSort(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string tag } && Enum.TryParse<SortField>(tag, out var field))
+            ViewModel.SortField = field;
+    }
+
+    private void OnMenuSortDirection(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string tag }) ViewModel.SortDescending = tag == "Desc";
+    }
+
+    private void OnOpenInOtherPane(object sender, RoutedEventArgs e) => ViewModel.RequestOpenInOtherPane();
+
+    private void OnHeaderClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string tag } && Enum.TryParse<SortField>(tag, out var field))
+            ViewModel.SortByCommand.Execute(field);
+    }
+
+    private void OnDetailsToggleClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ViewMode = FileViewMode.Details;
+        SyncViewToggles();
+    }
+
+    private void OnGridToggleClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.ViewMode = FileViewMode.Grid;
+        SyncViewToggles();
+    }
+
+    // ------------------------------------------------------------------ drag & drop
+
+    private void OnDragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        var items = e.Items.OfType<FileItemViewModel>().Where(i => !i.IsDrive).ToList();
+        if (items.Count == 0 || ViewModel.Provider is not { } provider || items.Any(i => i.IsRenaming))
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        string id = _drag.Begin(provider.Id, items.Select(i => i.Item).ToList());
+        _log.LogDebug("Drag start: {Count} items", items.Count);
+        e.Data.Properties.Add(DragDropBroker.PayloadProperty, id);
+        e.Data.RequestedOperation = DataPackageOperation.Copy | DataPackageOperation.Move;
+
+        // Local files can also be dropped into File Explorer, the desktop or other apps (rendered on demand).
+        if ((provider.Capabilities & StorageCapabilities.OpenWithShell) != 0)
+        {
+            var paths = items.Select(i => i.Path).ToArray();
+            e.Data.SetDataProvider(StandardDataFormats.StorageItems, request => ClipboardService.ProvideStorageItems(request, paths));
+        }
+    }
+
+    private void OnDragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        _log.LogDebug("Drag completed: {Op}", args.DropResult);
+        _drag.End();
+    }
+
+    private IReadOnlyList<StorageItem>? InternalPayload(DataPackageView view, out string providerId)
+    {
+        providerId = _drag.ProviderId;
+        return _drag.Id is { } id && view.Properties.TryGetValue(DragDropBroker.PayloadProperty, out var value) && value as string == id
+            ? _drag.Items
+            : null;
+    }
+
+    private async void OnListDragEnter(object sender, DragEventArgs e)
+    {
+        _externalDragRoot = null;
+        if (InternalPayload(e.DataView, out _) is not null || !e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+
+        // Learn where external files come from so the default (move on same drive, copy otherwise) matches Explorer.
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            if (items.Count > 0) _externalDragRoot = Path.GetPathRoot(items[0].Path);
+        }
+        catch
+        {
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void OnListDragOver(object sender, DragEventArgs e)
+    {
+        var plan = PlanDrop(e);
+        if (plan is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            SetDropTarget(null);
+            return;
+        }
+
+        e.AcceptedOperation = plan.Value.Kind == OperationKind.Move ? DataPackageOperation.Move : DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = $"{(plan.Value.Kind == OperationKind.Move ? "Move" : "Copy")} to {plan.Value.FolderName}";
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsGlyphVisible = true;
+        SetDropTarget(plan.Value.Target);
+    }
+
+    private void OnListDragLeave(object sender, DragEventArgs e) => SetDropTarget(null);
+
+    private async void OnListDrop(object sender, DragEventArgs e)
+    {
+        var plan = PlanDrop(e);
+        _log.LogDebug("Drop {Plan}", plan);
+        SetDropTarget(null);
+        if (plan is not { } p) return;
+
+        ViewModel.RequestActivation();
+        var items = InternalPayload(e.DataView, out string providerId);
+        if (items is null)
+        {
+            var deferral = e.GetDeferral();
+            try
+            {
+                var storageItems = await e.DataView.GetStorageItemsAsync();
+                items = await _clipboard.ResolveLocalAsync(storageItems.Select(s => s.Path));
+                providerId = LocalStorageProviderId;
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        }
+
+        if (items.Count > 0) ViewModel.Transfer(p.Kind, providerId, items, p.FolderPath);
+    }
+
+    private const string LocalStorageProviderId = "local";
+
+    private readonly record struct DropPlan(OperationKind Kind, string FolderPath, string FolderName, FileItemViewModel? Target);
+
+    /// <summary>Decides target folder and copy/move for the current drag position (Explorer rules).</summary>
+    private DropPlan? PlanDrop(DragEventArgs e)
+    {
+        if (ViewModel.Provider is not { } provider || ViewModel.Location is not { } location || ViewModel.IsSearchMode) return null;
+
+        var items = InternalPayload(e.DataView, out string sourceProvider);
+        bool external = items is null && e.DataView.Contains(StandardDataFormats.StorageItems);
+        if (items is null && !external) return null;
+
+        var target = ItemUnderPointer(e);
+        if (target is { IsContainer: false }) target = null;
+        if (target is not null && items?.Any(i => string.Equals(i.Path, target.Path, StringComparison.OrdinalIgnoreCase)) == true)
+            return null; // can't drop a folder onto itself
+
+        string folder;
+        if (target is not null)
+        {
+            folder = target.Path;
+        }
+        else
+        {
+            if (!ViewModel.CanWriteHere) return null;
+            folder = location.Path;
+            // Dropping back into the folder the items came from does nothing.
+            if (items is not null && sourceProvider == provider.Id &&
+                items.All(i => string.Equals(provider.GetParentPath(i.Path), folder, StringComparison.OrdinalIgnoreCase)))
+                return null;
+        }
+
+        string? sourceRoot = items is not null
+            ? (sourceProvider == provider.Id ? Path.GetPathRoot(items[0].Path) : null)
+            : _externalDragRoot;
+        bool sameVolume = sourceRoot is not null && string.Equals(sourceRoot, Path.GetPathRoot(folder), StringComparison.OrdinalIgnoreCase);
+
+        var kind = (e.Modifiers & DragDropModifiers.Control) != 0 ? OperationKind.Copy
+            : (e.Modifiers & DragDropModifiers.Shift) != 0 ? OperationKind.Move
+            : sameVolume ? OperationKind.Move : OperationKind.Copy;
+
+        return new DropPlan(kind, folder, target?.Name ?? provider.GetDisplayName(folder), target);
+    }
+
+    /// <summary>Row/tile under the drag position (hit-tested, since the list itself isn't the drop target).</summary>
+    private FileItemViewModel? ItemUnderPointer(DragEventArgs e)
+    {
+        if (ActiveList is not { } list) return null;
+        var point = e.GetPosition(null);
+        foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(point, list))
+        {
+            if (element is SelectorItem { Content: FileItemViewModel vm }) return vm;
+        }
+        return null;
+    }
+
+    private void SetDropTarget(FileItemViewModel? target)
+    {
+        if (_dropTarget == target) return;
+        if (_dropTarget is not null) _dropTarget.IsDropTarget = false;
+        _dropTarget = target;
+        if (target is not null) target.IsDropTarget = true;
+    }
+
+    // ------------------------------------------------------------------ address bar
+
+    private void OnAddressEditRequested(object? sender, EventArgs e) => EnterAddressEdit();
+
+    private void OnAddressTapped(object sender, TappedRoutedEventArgs e)
+    {
+        // Clicks on a breadcrumb segment navigate; clicks on empty space switch to typing mode (like Explorer).
+        for (var node = e.OriginalSource as DependencyObject; node is not null && node != AddressHost; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is BreadcrumbBarItem || node is AutoSuggestBox) return;
+        }
+        EnterAddressEdit();
+    }
+
+    private void EnterAddressEdit()
+    {
+        if (ViewModel.Location is null) return;
+        Crumbs.Visibility = Visibility.Collapsed;
+        AddressBox.Visibility = Visibility.Visible;
+        AddressBox.Text = ViewModel.Location.Path.Length == 0 ? "This PC" : ViewModel.Location.Path;
+        AddressBox.UpdateLayout(); // just became visible: template must exist before it can take focus
+        FocusTextOf(AddressBox);
+    }
+
+    private void ExitAddressEdit()
+    {
+        _suggestCts?.Cancel();
+        AddressBox.IsSuggestionListOpen = false;
+        AddressBox.Visibility = Visibility.Collapsed;
+        Crumbs.Visibility = Visibility.Visible;
+    }
+
+    private async void OnAddressSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        string text = args.ChosenSuggestion as string ?? args.QueryText;
+        ExitAddressEdit();
+        await ViewModel.NavigateToTypedPathAsync(text);
+        FocusList();
+    }
+
+    private async void OnAddressTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        _suggestCts?.Cancel();
+        var cts = _suggestCts = new CancellationTokenSource();
+        string text = sender.Text;
+        try
+        {
+            await Task.Delay(120, cts.Token); // debounce keystrokes
+            var suggestions = await ViewModel.GetPathSuggestionsAsync(text, cts.Token);
+            if (!cts.IsCancellationRequested) sender.ItemsSource = suggestions;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void OnAddressKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape)
+        {
+            e.Handled = true;
+            ExitAddressEdit();
+            FocusList();
+        }
+    }
+
+    private void OnAddressLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!AddressBox.IsSuggestionListOpen) ExitAddressEdit();
+    }
+
+    private async void OnCrumbClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
+    {
+        if (args.Item is BreadcrumbSegment segment && ViewModel.Provider is { } provider)
+            await ViewModel.NavigateAsync(new StorageLocation(provider.Id, segment.Path));
+    }
+
+    // ------------------------------------------------------------------ filter / search
+
+    private void OnFilterFocusRequested(object? sender, EventArgs e)
+    {
+        FocusTextOf(FilterBox);
+    }
+
+    private async void OnFilterSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        await ViewModel.StartSearchAsync();
+    }
+
+    private void OnFilterKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case VirtualKey.Escape:
+                e.Handled = true;
+                if (ViewModel.FilterText.Length > 0 || ViewModel.IsSearchMode)
+                {
+                    ViewModel.FilterText = string.Empty;
+                    ViewModel.ExitSearch();
+                }
+                else
+                {
+                    FocusList();
+                }
+                break;
+            case VirtualKey.Down:
+                // Keep hands on the keyboard: arrow down moves from the search box into the results.
+                e.Handled = true;
+                if (ViewModel.Items.Count > 0 && ActiveList?.SelectedItem is null)
+                    OnSelectionRequested(this, [ViewModel.Items[0]]);
+                else
+                    FocusList();
+                break;
+        }
+    }
+
+    private static void FocusTextOf(AutoSuggestBox host)
+    {
+        if (FindDescendant<TextBox>(host) is { } box)
+        {
+            box.Focus(FocusState.Keyboard);
+            box.SelectAll();
+        }
+        else
+        {
+            host.Focus(FocusState.Keyboard);
+        }
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } deeper) return deeper;
+        }
+        return null;
+    }
+}

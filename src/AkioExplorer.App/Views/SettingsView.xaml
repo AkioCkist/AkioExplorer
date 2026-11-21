@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="AkioExplorer.App.Views.SettingsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:AkioExplorer.App.Controls"
+    xmlns:models="using:AkioExplorer.Core.Models"
+    xmlns:conv="using:AkioExplorer.App.Converters">
+
+    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
+        <StackPanel x:Name="Body" Padding="32,24,32,32" Spacing="4" HorizontalAlignment="Stretch">
+            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,20" />
+
+            <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
+            <controls:SettingRow Glyph="&#xE790;" Header="App theme" Description="Light, Dark, or follow your Windows setting.">
+                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" AutomationProperties.Name="App theme">
+                    <x:String>Use system setting</x:String>
+                    <x:String>Light</x:String>
+                    <x:String>Dark</x:String>
+                </ComboBox>
+            </controls:SettingRow>
+
+            <TextBlock Text="Browsing" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
+            <controls:SettingRow Glyph="&#xE8FD;" Header="Default view for new panes" Description="You can still switch any pane with Ctrl+Shift+6 (Details) or Ctrl+Shift+2 (Grid).">
+                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.DefaultViewIndex, Mode=TwoWay}" AutomationProperties.Name="Default view">
+                    <x:String>Details</x:String>
+                    <x:String>Grid</x:String>
+                </ComboBox>
+            </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xE8A4;" Header="Open in dual-pane mode" Description="Show two panes side by side when AkioExplorer starts (toggle any time with Ctrl+Shift+D).">
+                <ToggleSwitch IsOn="{x:Bind ViewModel.DualPaneOnStartup, Mode=TwoWay}" AutomationProperties.Name="Open in dual-pane mode" />
+            </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xE81C;" Header="Reopen last folders" Description="Start where you left off in each pane.">
+                <ToggleSwitch IsOn="{x:Bind ViewModel.RestoreLastLocations, Mode=TwoWay}" AutomationProperties.Name="Reopen last folders" />
+            </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xED1A;" Header="Show hidden items" Description="Hidden files and folders appear dimmed.">
+                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowHiddenItems, Mode=TwoWay}" AutomationProperties.Name="Show hidden items" />
+            </controls:SettingRow>
+
+            <TextBlock Text="Copy and move" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
+            <controls:SettingRow Glyph="&#xE8C8;" Header="When a file with the same name exists" Description="Ask shows both files so you can compare size and date.">
+                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.ConflictBehaviorIndex, Mode=TwoWay}" AutomationProperties.Name="Conflict behavior">
+                    <x:String>Ask me</x:String>
+                    <x:String>Replace</x:String>
+                    <x:String>Skip</x:String>
+                    <x:String>Keep both</x:String>
+                </ComboBox>
+            </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xE9F5;" Header="Simultaneous operations" Description="How many copy or move jobs run at the same time. Others wait in line.">
+                <NumberBox Minimum="1" Maximum="8" SpinButtonPlacementMode="Compact" MinWidth="120"
+                           Value="{x:Bind ViewModel.MaxSimultaneousOperations, Mode=TwoWay}" AutomationProperties.Name="Simultaneous operations" />
+            </controls:SettingRow>
+
+            <TextBlock Text="Favorites" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
+            <TextBlock Text="No favorites yet. Right-click a folder and choose Pin to Favorites."
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,4"
+                       Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasFavorites)}" />
+            <ItemsControl ItemsSource="{x:Bind ViewModel.Favorites}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:FavoriteEntry">
+                        <controls:SettingRow Glyph="&#xE734;" Header="{x:Bind Name}" Description="{x:Bind Path}" Margin="0,0,0,4">
+                            <Button Content="Remove" Click="OnRemoveFavorite" Tag="{x:Bind}" />
+                        </controls:SettingRow>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
+            <controls:SettingRow Glyph="&#xE946;" Header="AkioExplorer" Description="{x:Bind ViewModel.Version}">
+                <Button Content="Open app data folder" Command="{x:Bind ViewModel.OpenDataFolderCommand}"
+                        ToolTipService.ToolTip="{x:Bind ViewModel.DataFolder}" />
+            </controls:SettingRow>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
