@@ -89,6 +89,24 @@ public sealed class CloudAppsConfig
         Reload();
     }
 
+    /// <summary>True when the user's cloud-apps.json holds an id for this service (the part <see cref="Clear"/> can remove).</summary>
+    public static bool HasSaved(CloudProviderType type) => ReadFile()?.For(type).IsSet == true;
+
+    /// <summary>
+    /// Removes one service's saved registration from the user's cloud-apps.json and applies it immediately.
+    /// An id built into the build or set by an environment variable still applies afterwards.
+    /// </summary>
+    public void Clear(CloudProviderType type)
+    {
+        if (ReadFile() is not { } file) return;
+        var target = file.For(type);
+        target.ClientId = null;
+        target.ClientSecret = null;
+
+        File.WriteAllText(FilePath, JsonSerializer.Serialize(file, WriteOptions));
+        Reload();
+    }
+
     private static CloudAppsConfig? LoadBuiltIn()
     {
         try

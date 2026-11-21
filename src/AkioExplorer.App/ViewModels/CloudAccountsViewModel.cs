@@ -38,6 +38,15 @@ public sealed partial class CloudAccountsViewModel : ObservableObject
     public void SaveRegistration(CloudProviderType type, string clientId, string? clientSecret) =>
         _config.Save(type, clientId, clientSecret);
 
+    /// <summary>True when the user saved an app id for this service in the add-account dialog.</summary>
+    public bool HasSavedRegistration(CloudProviderType type) => CloudProviders.CloudAppsConfig.HasSaved(type);
+
+    /// <summary>Forgets the app id the user saved for this service; the next sign-in asks for one again.</summary>
+    public void ClearRegistration(CloudProviderType type) => _config.Clear(type);
+
+    /// <summary>True when connected accounts of this service depend on its app id to refresh their sign-in.</summary>
+    public bool HasAccountsOf(CloudProviderType type) => Accounts.Any(a => a.Account.Type == type);
+
     [ObservableProperty] private bool _hasAccounts;
 
     /// <summary>Raised when an account needs the user to sign in again (sidebar shows a warning).</summary>

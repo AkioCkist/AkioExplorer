@@ -81,7 +81,7 @@ public static class AccountDialogs
                 else
                     ShowSetup(setup, choices, message, service, accounts, SignInAsync);
             };
-            choices.Children.Add(button);
+            choices.Children.Add(WithClearButton(button, service, accounts, message));
         }
 
         var body = new StackPanel { MinWidth = 380 };
@@ -167,6 +167,67 @@ public static class AccountDialogs
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>
+    /// Puts a "Clear app ID" button beside a service row when the user saved an id for it, so a wrong or blocked
+    /// registration can be replaced. A flyout confirms (a second ContentDialog can't open over this one).
+    /// </summary>
+    private static Grid WithClearButton(Button serviceButton, CloudServiceItem service, CloudAccountsViewModel accounts, InfoBar message)
+    {
+        var row = new Grid { ColumnSpacing = 6 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.Children.Add(serviceButton);
+
+        var clear = new Button
+        {
+            Content = new FontIcon { Glyph = "", FontSize = 16 },
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Padding = new Thickness(12, 0, 12, 0),
+            Visibility = accounts.HasSavedRegistration(service.Type) ? Visibility.Visible : Visibility.Collapsed,
+        };
+        string label = $"Clear {service.Name} app ID";
+        ToolTipService.SetToolTip(clear, label);
+        AutomationName(clear, label);
+        Grid.SetColumn(clear, 1);
+        row.Children.Add(clear);
+
+        var confirm = new Button { Content = "Clear app ID", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        var flyoutBody = new StackPanel { Spacing = 12, MaxWidth = 320 };
+        flyoutBody.Children.Add(new TextBlock { Text = $"Clear the saved {service.Name} app ID?", Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"] });
+        flyoutBody.Children.Add(new TextBlock
+        {
+            Text = accounts.HasAccountsOf(service.Type)
+                ? $"The next sign-in asks for a new ID. Connected {service.Name} accounts were signed in with this ID and will need to be reconnected."
+                : "The next sign-in asks for a new ID.",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        flyoutBody.Children.Add(confirm);
+        var flyout = new Flyout { Content = flyoutBody };
+        clear.Flyout = flyout;
+
+        confirm.Click += (_, _) =>
+        {
+            flyout.Hide();
+            try
+            {
+                accounts.ClearRegistration(service.Type);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Show(message, $"Couldn't save {CloudAppsConfig.FilePath}: {ex.Message}", InfoBarSeverity.Error);
+                return;
+            }
+
+            clear.Visibility = Visibility.Collapsed;
+            serviceButton.Content = ServiceRow(service);
+            if (service.IsConfigured)
+                Show(message, $"Saved {service.Name} app ID cleared. This build or an environment variable still provides one, so sign-in keeps using it.", InfoBarSeverity.Warning);
+            else
+                Show(message, $"{service.Name} app ID cleared. Pick {service.Name} to enter a new one.", InfoBarSeverity.Success);
+        };
+        return row;
+    }
 
     private static Grid ServiceRow(CloudServiceItem service)
     {
