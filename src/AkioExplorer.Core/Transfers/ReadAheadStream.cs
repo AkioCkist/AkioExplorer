@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Threading.Channels;
 
 namespace AkioExplorer.Core.Transfers;
@@ -6,7 +7,8 @@ namespace AkioExplorer.Core.Transfers;
 /// Forward-only stream that keeps reading the source in the background while the consumer is busy. For
 /// cloud → cloud copies this overlaps the download of the next blocks with the upload of the current one, instead
 /// of the two taking turns (an upload chunk waits for the service's confirmation; meanwhile the download idles).
-/// Memory is bounded: at most <c>blocks × blockSize</c> bytes are buffered.
+/// Memory is bounded: at most <c>blocks × blockSize</c> bytes are buffered, and blocks are rented from
+/// <see cref="ArrayPool{T}"/> (4 MB arrays live on the large object heap; allocating one per block made long copies GC-heavy).
 /// </summary>
 public sealed class ReadAheadStream : Stream
 {
@@ -36,16 +38,28 @@ public sealed class ReadAheadStream : Stream
         {
             while (true)
             {
-                var buffer = new byte[_blockSize];
+                var buffer = ArrayPool<byte>.Shared.Rent(_blockSize);
                 int filled = 0;
-                while (filled < buffer.Length)
+                bool queued = false;
+                try
                 {
-                    int read = await _source.ReadAsync(buffer.AsMemory(filled), _stop.Token).ConfigureAwait(false);
-                    if (read == 0) break;
-                    filled += read;
+                    while (filled < _blockSize)
+                    {
+                        int read = await _source.ReadAsync(buffer.AsMemory(filled, _blockSize - filled), _stop.Token).ConfigureAwait(false);
+                        if (read == 0) break;
+                        filled += read;
+                    }
+                    if (filled > 0)
+                    {
+                        await _blocks.Writer.WriteAsync((buffer, filled), _stop.Token).ConfigureAwait(false);
+                        queued = true;
+                    }
                 }
-                if (filled > 0) await _blocks.Writer.WriteAsync((buffer, filled), _stop.Token).ConfigureAwait(false);
-                if (filled < buffer.Length) break;
+                finally
+                {
+                    if (!queued) ArrayPool<byte>.Shared.Return(buffer);
+                }
+                if (filled < _blockSize) break;
             }
             _blocks.Writer.TryComplete();
         }
@@ -69,6 +83,7 @@ public sealed class ReadAheadStream : Stream
             }
             if (_blocks.Reader.TryRead(out var block))
             {
+                ReturnCurrent();
                 (_current, _currentCount, _currentOffset) = (block.Buffer, block.Count, 0);
             }
         }
@@ -110,12 +125,27 @@ public sealed class ReadAheadStream : Stream
 
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
+    private void ReturnCurrent()
+    {
+        if (_current is null) return;
+        ArrayPool<byte>.Shared.Return(_current);
+        _current = null;
+    }
+
+    /// <summary>Returns every block still held (current one and any queued) once the pump has stopped.</summary>
+    private void ReturnBuffers()
+    {
+        ReturnCurrent();
+        while (_blocks.Reader.TryRead(out var block)) ArrayPool<byte>.Shared.Return(block.Buffer);
+    }
+
     public override async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
         _stop.Cancel();
         try { await _pump.ConfigureAwait(false); } catch { }
+        ReturnBuffers();
         await _source.DisposeAsync().ConfigureAwait(false);
         _stop.Dispose();
         GC.SuppressFinalize(this);
@@ -128,6 +158,7 @@ public sealed class ReadAheadStream : Stream
             _disposed = true;
             _stop.Cancel();
             try { _pump.GetAwaiter().GetResult(); } catch { }
+            ReturnBuffers();
             _source.Dispose();
             _stop.Dispose();
         }

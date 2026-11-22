@@ -24,7 +24,21 @@ public enum StorageItemAttributes
 /// </summary>
 public sealed record StorageItem
 {
-    public required string Name { get; init; }
+    private readonly string _name = string.Empty;
+
+    // Derived from Name only (so record equality is unaffected). Computed once: Extension is read on every icon
+    // lookup, type-name lookup and sort comparison, and Path.GetExtension allocates a new string each call.
+    private readonly string _nameExtension = string.Empty;
+
+    public required string Name
+    {
+        get => _name;
+        init
+        {
+            _name = value;
+            _nameExtension = System.IO.Path.GetExtension(value);
+        }
+    }
 
     /// <summary>Provider-specific path / id that the owning provider understands.</summary>
     public required string Path { get; init; }
@@ -55,5 +69,5 @@ public sealed record StorageItem
     public bool IsHidden => (Attributes & StorageItemAttributes.Hidden) != 0;
 
     [JsonIgnore]
-    public string Extension => Kind == StorageItemKind.File ? System.IO.Path.GetExtension(Name) : string.Empty;
+    public string Extension => Kind == StorageItemKind.File ? _nameExtension : string.Empty;
 }

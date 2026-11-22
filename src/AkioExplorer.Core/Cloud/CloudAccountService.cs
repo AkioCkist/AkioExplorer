@@ -33,7 +33,7 @@ public sealed class CloudAccountService : ICloudAccountService
 
     public IReadOnlyList<CloudAccount> Accounts => _settings.Current.CloudAccounts;
 
-    public IReadOnlyList<ICloudConnector> Connectors => _connectors.Values.OrderBy(c => c.Type).ToList();
+    public IReadOnlyList<ICloudConnector> Connectors => _connectors.Values.OrderBy(c => c.Category).ThenBy(c => c.Type).ToList();
 
     public event EventHandler? AccountsChanged;
 
@@ -45,15 +45,15 @@ public sealed class CloudAccountService : ICloudAccountService
         }
     }
 
-    public async Task<CloudAccount> AddAccountAsync(CloudProviderType type, CancellationToken cancellationToken)
+    public async Task<CloudAccount> AddAccountAsync(CloudProviderType type, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken)
     {
-        var connector = GetConnector(type);
+        var connector = RequireConnector(type);
         var account = new CloudAccount { Type = type, DisplayName = connector.Name };
 
         CloudIdentity identity;
         try
         {
-            identity = await connector.AuthenticateAsync(account, cancellationToken).ConfigureAwait(false);
+            identity = await connector.AuthenticateAsync(account, values, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -69,6 +69,8 @@ public sealed class CloudAccountService : ICloudAccountService
             var secret = _credentials.Load(account.CredentialKey);
             _credentials.Delete(account.CredentialKey);
             if (secret is not null) _credentials.Save(existing.CredentialKey, secret);
+            existing.Settings = account.Settings;
+            _settings.Save();
             Register(connector, existing);
             AccountsChanged?.Invoke(this, EventArgs.Empty);
             return existing;
@@ -85,11 +87,12 @@ public sealed class CloudAccountService : ICloudAccountService
         return account;
     }
 
-    public async Task ReconnectAsync(Guid accountId, CancellationToken cancellationToken)
+    public async Task ReconnectAsync(Guid accountId, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken)
     {
         var account = Find(accountId);
-        var connector = GetConnector(account.Type);
-        await connector.AuthenticateAsync(account, cancellationToken).ConfigureAwait(false);
+        var connector = RequireConnector(account.Type);
+        await connector.AuthenticateAsync(account, values, cancellationToken).ConfigureAwait(false);
+        _settings.Save(); // the form may have changed the server, user name…
         Register(connector, account); // fresh provider = fresh token cache
         AccountsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -122,7 +125,7 @@ public sealed class CloudAccountService : ICloudAccountService
         _credentials.Delete(account.CredentialKey);
         _settings.Current.CloudAccounts.Remove(account);
         _settings.Save();
-        _providers.Remove(accountId);
+        if (_providers.Remove(accountId, out var old)) (old as IDisposable)?.Dispose();
         _registry.Unregister(account.ProviderId);
         AccountsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -136,7 +139,9 @@ public sealed class CloudAccountService : ICloudAccountService
         _registry.Register(provider);
     }
 
-    private ICloudConnector GetConnector(CloudProviderType type) =>
+    public ICloudConnector? GetConnector(CloudProviderType type) => _connectors.GetValueOrDefault(type);
+
+    private ICloudConnector RequireConnector(CloudProviderType type) =>
         _connectors.TryGetValue(type, out var connector)
             ? connector
             : throw new StorageException(StorageErrorKind.NotSupported, $"{type} isn't available in this build.");

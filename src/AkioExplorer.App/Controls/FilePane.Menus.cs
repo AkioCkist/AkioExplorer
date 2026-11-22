@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Logic;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -46,18 +47,26 @@ public sealed partial class FilePane
         var shellTask = ViewModel.GetShellMenuAsync(background, extended);
         var editorTask = ViewModel.GetPreferredEditorAsync();
         Task openWithTask = background ? Task.CompletedTask : FillOpenWithAsync(version);
+        var archiverTask = background ? Task.FromResult<IReadOnlyList<ArchiverApp>>([]) : ViewModel.GetArchiversAsync();
 
         // Short wait so the menu usually opens complete (no jump); slow shell extensions are added once ready.
-        await Task.WhenAny(Task.WhenAll(shellTask, editorTask, openWithTask), Task.Delay(ShellMenuWait));
+        await Task.WhenAny(Task.WhenAll(shellTask, editorTask, openWithTask, archiverTask), Task.Delay(ShellMenuWait));
         if (version != _menuVersion) return;
 
         if (editorTask.IsCompletedSuccessfully) ApplyEditor(editorTask.Result);
+        if (archiverTask.IsCompletedSuccessfully) AddArchiverItems(archiverTask.Result);
         if (shellTask.IsCompletedSuccessfully) AddShellItems(shellTask.Result, background, version);
 
         if (options is not null) menu.ShowAt(list, options);
         else menu.ShowAt(anchor);
 
         if (!editorTask.IsCompleted) ApplyEditor(await editorTask);
+        if (!archiverTask.IsCompleted)
+        {
+            IReadOnlyList<ArchiverApp> apps = [];
+            try { apps = await archiverTask; } catch { }
+            if (version == _menuVersion) AddArchiverItems(apps);
+        }
         if (!shellTask.IsCompleted)
         {
             IShellMenu? shell = null;
@@ -83,6 +92,59 @@ public sealed partial class FilePane
             MenuOpenEditor.Visibility = Visibility.Collapsed;
             MenuBgEditor.Visibility = Visibility.Collapsed;
         }
+    }
+
+    // ------------------------------------------------------------------ installed archivers
+
+    /// <summary>
+    /// Archive ▸ WinRAR ▸ / 7-Zip ▸ …: compress to the app's formats and extract any archive type it opens. One submenu
+    /// per installed app, with its icon, so "Extract here" never leaves doubt about which program runs.
+    /// </summary>
+    private void AddArchiverItems(IReadOnlyList<ArchiverApp> apps)
+    {
+        if (apps.Count == 0) return;
+        bool compress = ViewModel.CanCompressWithArchiver;
+        var archives = ViewModel.SelectedArchives;
+        if (!compress && archives.Count == 0) return;
+
+        var host = MenuArchive.Items;
+        if (host.Any(i => i.Visibility == Visibility.Visible)) Track(host, new MenuFlyoutSeparator());
+        foreach (var app in apps)
+        {
+            var sub = new MenuFlyoutSubItem { Text = app.Name, Icon = ToIcon(app.Icon) ?? new FontIcon { Glyph = "" } };
+            if (compress)
+            {
+                foreach (var format in ArchiverCommands.CompressFormats(app.Kind))
+                {
+                    var item = new MenuFlyoutItem { Text = $"Add to \"{ViewModel.ArchiveNameFor(format)}\"", Icon = new FontIcon { Glyph = "" } };
+                    string chosen = format;
+                    item.Click += (_, _) => ViewModel.CompressWith(app, chosen);
+                    sub.Items.Add(item);
+                }
+                if (ArchiverCommands.HasAddDialog(app.Kind))
+                {
+                    var dialog = new MenuFlyoutItem { Text = "Add to archive…", Icon = new FontIcon { Glyph = "" } };
+                    dialog.Click += (_, _) => ViewModel.CompressWith(app, format: null);
+                    sub.Items.Add(dialog);
+                }
+            }
+            if (archives.Count > 0)
+            {
+                if (sub.Items.Count > 0) sub.Items.Add(new MenuFlyoutSeparator());
+                var here = new MenuFlyoutItem { Text = "Extract here", Icon = new FontIcon { Glyph = "" } };
+                here.Click += (_, _) => ViewModel.ExtractWith(app, toFolder: false);
+                var folder = new MenuFlyoutItem
+                {
+                    Text = archives.Count == 1 ? $"Extract to \"{ArchiverCommands.ExtractFolderName(archives[0].Path)}\\\"" : "Extract each to its own folder",
+                    Icon = new FontIcon { Glyph = "" },
+                };
+                folder.Click += (_, _) => ViewModel.ExtractWith(app, toFolder: true);
+                sub.Items.Add(here);
+                sub.Items.Add(folder);
+            }
+            Track(host, sub);
+        }
+        MenuArchive.Visibility = Visibility.Visible;
     }
 
     // ------------------------------------------------------------------ open with

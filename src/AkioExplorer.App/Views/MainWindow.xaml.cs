@@ -212,6 +212,7 @@ public sealed partial class MainWindow : Window
         {
             var shell = App.Services.GetRequiredService<IShellMenuService>();
             _ = shell.GetCodeEditorsAsync();
+            _ = App.Services.GetRequiredService<IArchiverService>().GetArchiversAsync();
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             (await shell.GetBackgroundMenuAsync(home, extended: false))?.Dispose();
         }
@@ -425,7 +426,7 @@ public sealed partial class MainWindow : Window
         Nav.MenuItems.Clear();
 
         Nav.MenuItems.Add(CreateNavItem("Home", "", MainViewModel.Home, "This PC: your folders and drives"));
-        _transfersItem = new NavigationViewItem { Content = "Transfer queue", Icon = new FontIcon { Glyph = "\uE896" }, Tag = TransfersTag };
+        _transfersItem = new NavigationViewItem { Content = "Transfer queue", Icon = new FontIcon { Glyph = "\uE8AB" }, Tag = TransfersTag };
         ToolTipService.SetToolTip(_transfersItem, "Running and waiting copies, uploads and downloads");
         Nav.MenuItems.Add(_transfersItem);
         var recent = new NavigationViewItem { Content = "Recent transfers", Icon = new FontIcon { Glyph = "\uE81C" }, Tag = HistoryTag };
@@ -865,7 +866,7 @@ public sealed partial class MainWindow : Window
         Cmd("Folders first on / off", "View", null, "", () => true, () => P().FoldersFirst = !P().FoldersFirst);
 
         // App
-        Cmd("Transfer queue", "App", null, "", () => true, () => ShowTransfers(history: false), "downloads uploads");
+        Cmd("Transfer queue", "App", null, "", () => true, () => ShowTransfers(history: false), "downloads uploads");
         Cmd("Recent transfers", "App", null, "", () => true, () => ShowTransfers(history: true), "history");
         Cmd("Settings", "App", null, "", () => true, ShowSettings, "options preferences");
         Cmd("Add cloud account…", "App", null, "", () => true, () => _ = AddCloudAccountAsync(), "google drive dropbox onedrive");

@@ -100,7 +100,8 @@ public static class LocalFileTools
                     }
                     var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
                     entry.LastWriteTime = File.GetLastWriteTime(full);
-                    using var input = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize);
+                    // bufferSize 0: reads already go through our 1 MB buffer; a FileStream buffer per file would be another 1 MB each.
+                    using var input = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 0, FileOptions.SequentialScan);
                     using var output = entry.Open();
                     int read;
                     while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
@@ -172,7 +173,7 @@ public static class LocalFileTools
         using var sha512 = IncrementalHash.CreateHash(HashAlgorithmName.SHA512);
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.SequentialScan);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 0, FileOptions.SequentialScan);
             long total = Math.Max(1, stream.Length);
             var buffer = new byte[BufferSize];
             long done = 0;

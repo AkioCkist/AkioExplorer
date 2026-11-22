@@ -27,12 +27,13 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
         _logger = logger;
     }
 
+    /// <remarks>Keys are case-insensitive (callers cache with OrdinalIgnoreCase), so the extension is used as is: no per-call allocation.</remarks>
     public string GetIconKey(StorageItem item) => item.Kind switch
     {
         StorageItemKind.Folder => "<folder>",
         StorageItemKind.Drive => "<drive>" + item.Path,
         _ when PerFileIconExtensions.Contains(item.Extension) && IsLocalPath(item.Path) => item.Path,
-        _ => string.IsNullOrEmpty(item.Extension) ? "<file>" : item.Extension.ToLowerInvariant(),
+        _ => string.IsNullOrEmpty(item.Extension) ? "<file>" : item.Extension,
     };
 
     public Task<IconBitmap?> GetIconAsync(StorageItem item, IconSize size)

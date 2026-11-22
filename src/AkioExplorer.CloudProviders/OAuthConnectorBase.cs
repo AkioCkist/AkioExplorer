@@ -43,9 +43,29 @@ public abstract class OAuthConnectorBase : ICloudConnector
     protected OAuthTokenSource TokenSource(CloudAccount account) =>
         _sources.GetOrAdd(account.Id, _ => new OAuthTokenSource(CreateOAuthClient(), Store, account, Name));
 
-    public async Task<CloudIdentity> AuthenticateAsync(CloudAccount account, CancellationToken cancellationToken)
+    public virtual CloudCategory Category => CloudCategory.Popular;
+
+    public virtual string Description => IsConfigured ? "Sign in with your browser" : "One-time setup, then sign in with your browser";
+
+    public virtual string Keywords => string.Empty;
+
+    /// <summary>Asked before the browser opens (e.g. a SharePoint site address). Stored in the account's settings.</summary>
+    public virtual IReadOnlyList<CloudField> Fields => [];
+
+    public bool UsesBrowserSignIn => true;
+
+    /// <summary>Checks and normalises the form values before the browser opens; throw <see cref="StorageException"/> to reject.</summary>
+    protected virtual IReadOnlyDictionary<string, string> PrepareSettings(IReadOnlyDictionary<string, string> values) =>
+        Forms.CloudForm.NonSecret(Fields, values, existing: null);
+
+    public async Task<CloudIdentity> AuthenticateAsync(CloudAccount account, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken)
     {
         if (!IsConfigured) throw new StorageException(StorageErrorKind.NotSupported, SetupHint);
+        if (Fields.Count > 0)
+        {
+            var settings = PrepareSettings(Forms.CloudForm.Merge(Fields, values, account.Settings));
+            account.Settings = new Dictionary<string, string>(settings, StringComparer.Ordinal);
+        }
         try
         {
             var client = CreateOAuthClient();

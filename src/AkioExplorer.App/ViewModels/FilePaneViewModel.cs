@@ -41,6 +41,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private readonly IShellIconExtractor _shell;
     private readonly IShellActions _shellActions;
     private readonly IShellMenuService _shellMenus;
+    private readonly IArchiverService _archivers;
     private readonly ISettingsService _settings;
     private readonly FavoritesService _favorites;
     private readonly DialogService _dialogs;
@@ -76,6 +77,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         IShellIconExtractor shell,
         IShellActions shellActions,
         IShellMenuService shellMenus,
+        IArchiverService archivers,
         ISettingsService settings,
         FavoritesService favorites,
         DialogService dialogs,
@@ -91,6 +93,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _shell = shell;
         _shellActions = shellActions;
         _shellMenus = shellMenus;
+        _archivers = archivers;
         _settings = settings;
         _favorites = favorites;
         _dialogs = dialogs;
@@ -601,7 +604,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         SortList(newAll);
         _all = newAll;
         _byPath = newMap;
-        ApplyView(replace);
+        ApplyView(replace, fromRefresh: true);
 
         if (focusPath is not null && newMap.TryGetValue(focusPath, out var focus))
             SelectionRequested?.Invoke(this, [focus]);
@@ -639,7 +642,18 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
          || vm.Name.Equals("Thumbs.db", StringComparison.OrdinalIgnoreCase)
          || vm.Name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase));
 
-    private void ApplyView(bool replace)
+    /// <summary>
+    /// Incremental list updates cost one ListView notification (and one array shift) per row. Past this many changed
+    /// rows a single Reset is far cheaper: typing "a" in the filter box of a 10 000-item folder would otherwise remove
+    /// thousands of rows one by one.
+    /// </summary>
+    private const int MaxIncrementalChanges = 64;
+
+    /// <param name="fromRefresh">
+    /// A re-listing (watcher, refresh, cached navigation): keep the scroll position with row-by-row updates unless
+    /// most of the list changed. Otherwise the user changed what is shown (filter, chips, settings).
+    /// </param>
+    private void ApplyView(bool replace, bool fromRefresh = false)
     {
         if (IsSearchMode) return;
 
@@ -651,9 +665,16 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
         if (replace)
         {
-            var keep = _selected.Where(visible.Contains).ToList();
+            var keep = KeptSelection(visible);
             Items.ReplaceAll(visible);
             if (keep.Count > 0) SelectionRequested?.Invoke(this, keep);
+        }
+        else if (IsLargeChange(visible, fromRefresh ? Math.Max(MaxIncrementalChanges, Items.Count / 2) : MaxIncrementalChanges))
+        {
+            // Same rows kept selected, but without scrolling or taking focus (the user may be typing in the filter box).
+            var keep = KeptSelection(visible);
+            Items.ReplaceAll(visible);
+            if (keep.Count > 0) SelectionRestoreRequested?.Invoke(this, keep);
         }
         else
         {
@@ -662,6 +683,30 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
         UpdateStatus();
     }
+
+    private List<FileItemViewModel> KeptSelection(List<FileItemViewModel> visible)
+    {
+        if (_selected.Count == 0) return [];
+        var shown = new HashSet<FileItemViewModel>(visible);
+        return _selected.Where(shown.Contains).ToList();
+    }
+
+    /// <summary>True when more than <paramref name="limit"/> rows would be added or removed to show <paramref name="visible"/>.</summary>
+    private bool IsLargeChange(List<FileItemViewModel> visible, int limit)
+    {
+        if (Math.Abs(visible.Count - Items.Count) > limit) return true;
+        var shown = new HashSet<FileItemViewModel>(Items);
+        int added = 0;
+        foreach (var vm in visible)
+        {
+            if (!shown.Contains(vm) && ++added > limit) return true;
+        }
+        int removed = Items.Count - (visible.Count - added);
+        return added + removed > limit;
+    }
+
+    /// <summary>Asks the view to select these items again after a list reset, without scrolling or moving focus.</summary>
+    public event EventHandler<IReadOnlyList<FileItemViewModel>>? SelectionRestoreRequested;
 
     /// <summary>Type / date / size filters also narrow the folder being browsed, so the chips always mean what they show.</summary>
     partial void OnSearchFiltersChanged(SearchQuery value)
@@ -1173,7 +1218,22 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private void TrySelectPending()
     {
         if (_pendingSelection.Count == 0) return;
-        var found = _pendingSelection.Where(_byPath.ContainsKey).Select(p => _byPath[p]).Where(Items.Contains).ToList();
+        var found = new List<FileItemViewModel>();
+        foreach (var path in _pendingSelection)
+        {
+            if (_byPath.TryGetValue(path, out var vm)) found.Add(vm);
+        }
+        if (found.Count == 0) return;
+        if (found.Count > 8)
+        {
+            // Batch rename / extract can select thousands: Items.Contains per item would be O(n·k).
+            var shown = new HashSet<FileItemViewModel>(Items);
+            found.RemoveAll(vm => !shown.Contains(vm));
+        }
+        else
+        {
+            found.RemoveAll(vm => !Items.Contains(vm));
+        }
         if (found.Count == 0) return;
         _pendingSelection.Clear();
         SelectionRequested?.Invoke(this, found);

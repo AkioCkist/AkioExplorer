@@ -41,6 +41,8 @@ public sealed class CloudAppsConfig
 
     public CloudAppRegistration OneDrive { get; set; } = new();
 
+    public CloudAppRegistration Box { get; set; } = new();
+
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AkioExplorer", "cloud-apps.json");
 
@@ -52,11 +54,13 @@ public sealed class CloudAppsConfig
             Merge(config.GoogleDrive, fromFile.GoogleDrive);
             Merge(config.Dropbox, fromFile.Dropbox);
             Merge(config.OneDrive, fromFile.OneDrive);
+            Merge(config.Box, fromFile.Box);
         }
 
         Override(config.GoogleDrive, "AKIO_GOOGLE_CLIENT_ID", "AKIO_GOOGLE_CLIENT_SECRET");
         Override(config.Dropbox, "AKIO_DROPBOX_APP_KEY", null);
         Override(config.OneDrive, "AKIO_ONEDRIVE_CLIENT_ID", null);
+        Override(config.Box, "AKIO_BOX_CLIENT_ID", "AKIO_BOX_CLIENT_SECRET");
         return config;
     }
 
@@ -67,13 +71,15 @@ public sealed class CloudAppsConfig
         GoogleDrive = fresh.GoogleDrive;
         Dropbox = fresh.Dropbox;
         OneDrive = fresh.OneDrive;
+        Box = fresh.Box;
     }
 
     public CloudAppRegistration For(CloudProviderType type) => type switch
     {
         CloudProviderType.GoogleDrive => GoogleDrive,
         CloudProviderType.Dropbox => Dropbox,
-        _ => OneDrive,
+        CloudProviderType.Box => Box,
+        _ => OneDrive, // OneDrive, OneDrive for Business and SharePoint share one Microsoft registration
     };
 
     /// <summary>Stores one service's registration in the user's cloud-apps.json and applies it immediately.</summary>

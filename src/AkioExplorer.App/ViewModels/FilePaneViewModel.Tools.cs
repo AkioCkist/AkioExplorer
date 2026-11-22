@@ -36,6 +36,11 @@ public sealed partial class FilePaneViewModel
 
     private List<FileItemViewModel> SelectedNonDrives => _selected.Where(s => !s.IsDrive).ToList();
 
+    // CanExecute checks run on every selection change: test without building lists.
+    private bool HasNonDriveSelection => _selected.Exists(s => !s.IsDrive);
+
+    private static bool IsZip(FileItemViewModel s) => !s.IsContainer && s.Item.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase);
+
     private void UpdateToolCommandStates()
     {
         NewTextFileCommand.NotifyCanExecuteChanged();
@@ -285,7 +290,7 @@ public sealed partial class FilePaneViewModel
         return _shellMenus.GetItemMenuAsync(paths, extended);
     }
 
-    private bool CanNewFolderFromSelection() => CanCreateFolder() && HasMovableSelection && SelectedNonDrives.Count > 0;
+    private bool CanNewFolderFromSelection() => CanCreateFolder() && HasMovableSelection && HasNonDriveSelection;
 
     /// <summary>Moves the selection into a new folder (named after the item when only one is selected), then renames it.</summary>
     [RelayCommand(CanExecute = nameof(CanNewFolderFromSelection))]
@@ -429,7 +434,7 @@ public sealed partial class FilePaneViewModel
 
     // ------------------------------------------------------------------ ZIP
 
-    private bool CanCompress() => IsLocalProvider && SelectedNonDrives.Count > 0 && !IsAtRoot;
+    private bool CanCompress() => IsLocalProvider && HasNonDriveSelection && !IsAtRoot;
 
     [RelayCommand(CanExecute = nameof(CanCompress))]
     private async Task CompressAsync()
@@ -437,10 +442,7 @@ public sealed partial class FilePaneViewModel
         if (!CanCompress()) return;
         var items = SelectedNonDrives;
         string folder = Path.GetDirectoryName(items[0].Path.TrimEnd('\\'))!;
-        string baseName = items.Count == 1
-            ? (items[0].IsContainer ? items[0].Name : Path.GetFileNameWithoutExtension(items[0].Name))
-            : Path.GetFileName(folder.TrimEnd('\\')) is { Length: > 0 } parent ? parent : "Archive";
-        string zipName = FileNameValidator.GetUniqueName(baseName + ".zip", ExistingNames(folder));
+        string zipName = FileNameValidator.GetUniqueName(ArchiveBaseName(items, folder) + ".zip", ExistingNames(folder));
         string zipPath = Path.Combine(folder, zipName);
 
         await RunWithProgressAsync($"Compressing to \"{zipName}\"", async (progress, ct) =>
@@ -452,10 +454,92 @@ public sealed partial class FilePaneViewModel
         });
     }
 
-    private List<FileItemViewModel> SelectedZips =>
-        _selected.Where(s => !s.IsContainer && s.Item.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
+    /// <summary>"Photos" for one item (folder name, or file name without extension), else the parent folder's name.</summary>
+    private static string ArchiveBaseName(IReadOnlyList<FileItemViewModel> items, string folder) =>
+        items.Count == 1
+            ? (items[0].IsContainer ? items[0].Name : Path.GetFileNameWithoutExtension(items[0].Name))
+            : Path.GetFileName(folder.TrimEnd('\\')) is { Length: > 0 } parent ? parent : "Archive";
 
-    private bool CanExtract() => IsLocalProvider && SelectedZips.Count > 0;
+    // ------------------------------------------------------------------ installed archivers (7-Zip, WinRAR…)
+
+    /// <summary>7-Zip, WinRAR, NanaZip, Bandizip, PeaZip when installed (only for files on this PC).</summary>
+    public Task<IReadOnlyList<ArchiverApp>> GetArchiversAsync() =>
+        IsLocalProvider ? _archivers.GetArchiversAsync() : Task.FromResult<IReadOnlyList<ArchiverApp>>([]);
+
+    /// <summary>Selected items that can go into an archive: not drives, and all in the first item's folder.</summary>
+    private List<FileItemViewModel> ArchivableSelection()
+    {
+        var items = SelectedNonDrives;
+        if (items.Count == 0) return items;
+        string? folder = Path.GetDirectoryName(items[0].Path.TrimEnd('\\'));
+        return items.Where(i => string.Equals(Path.GetDirectoryName(i.Path.TrimEnd('\\')), folder, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    public bool CanCompressWithArchiver => CanCompress();
+
+    /// <summary>Selected archive files of any format an archiver opens (.rar, .7z, .tar.gz, .iso…).</summary>
+    public IReadOnlyList<FileItemViewModel> SelectedArchives =>
+        IsLocalProvider ? _selected.Where(s => !s.IsContainer && ArchiverCommands.IsArchive(s.Path)).ToList() : [];
+
+    /// <summary>Free archive name for the selection in this format: "Photos.rar", or "Photos (2).rar" when taken.</summary>
+    public string ArchiveNameFor(string format)
+    {
+        var items = ArchivableSelection();
+        if (items.Count == 0) return string.Empty;
+        string folder = Path.GetDirectoryName(items[0].Path.TrimEnd('\\'))!;
+        // The current folder's names are already in memory; search results may sit elsewhere.
+        var names = Location is not null && string.Equals(folder, Location.Path, StringComparison.OrdinalIgnoreCase)
+            ? _all.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : ExistingNames(folder);
+        return FileNameValidator.GetUniqueName($"{ArchiveBaseName(items, folder)}.{format}", names);
+    }
+
+    /// <summary>Compresses the selection with an installed archiver into <c>Name.format</c>, or opens its own dialog.</summary>
+    public void CompressWith(ArchiverApp app, string? format)
+    {
+        var items = ArchivableSelection();
+        if (items.Count == 0) return;
+        string folder = Path.GetDirectoryName(items[0].Path.TrimEnd('\\'))!;
+        string name = ArchiveNameFor(format ?? ArchiverCommands.CompressFormats(app.Kind).FirstOrDefault() ?? "7z");
+        string archive = Path.Combine(folder, name);
+        if (RunArchiver(app, ArchiverCommands.Compress(app, items.Select(i => i.Path).ToList(), archive, showDialog: format is null))
+            && format is not null)
+        {
+            SelectWhenListed([archive]);
+        }
+    }
+
+    /// <summary>Extracts the selected archives with an installed archiver, here or each into its own folder.</summary>
+    public void ExtractWith(ArchiverApp app, bool toFolder)
+    {
+        var archives = SelectedArchives;
+        var created = new List<string>();
+        foreach (var archive in archives)
+        {
+            if (!RunArchiver(app, ArchiverCommands.Extract(app, archive.Path, toFolder))) return;
+            if (toFolder) created.Add(Path.Combine(Path.GetDirectoryName(archive.Path)!, ArchiverCommands.ExtractFolderName(archive.Path)));
+        }
+        if (created.Count > 0) SelectWhenListed(created);
+    }
+
+    private bool RunArchiver(ArchiverApp app, ArchiverInvocation invocation)
+    {
+        try
+        {
+            // The archiver shows its own progress, password and overwrite prompts; the folder watcher shows the result.
+            _archivers.Start(invocation);
+            return true;
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            ShowError($"Couldn't start {app.Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private List<FileItemViewModel> SelectedZips => _selected.Where(IsZip).ToList();
+
+    private bool CanExtract() => IsLocalProvider && _selected.Exists(IsZip);
 
     [RelayCommand(CanExecute = nameof(CanExtract))]
     private Task ExtractHereAsync() => ExtractAsync(intoOwnFolder: false);
@@ -544,7 +628,7 @@ public sealed partial class FilePaneViewModel
 
     // ------------------------------------------------------------------ attributes
 
-    private bool CanToggleAttribute() => IsLocalProvider && SelectedNonDrives.Count > 0;
+    private bool CanToggleAttribute() => IsLocalProvider && HasNonDriveSelection;
 
     [RelayCommand(CanExecute = nameof(CanToggleAttribute))]
     private Task ToggleHiddenAttributeAsync() => ToggleAttributeAsync(FileAttributes.Hidden, StorageItemAttributes.Hidden);

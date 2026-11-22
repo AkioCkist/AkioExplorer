@@ -8,9 +8,12 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Official SDKs. OneDrive uses the Microsoft Graph REST API directly (see docs/CLOUD-SETUP.md). -->
+    <PackageReference Include="FluentFTP" Version="55.1.0" />
     <PackageReference Include="Google.Apis.Drive.v3" Version="1.78.0.4327" />
     <PackageReference Include="Dropbox.Api" Version="7.4.2" />
+    <PackageReference Include="MegaApiClient" Version="1.10.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="SSH.NET" Version="2026.0.1" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="AkioExplorer.Tests" />

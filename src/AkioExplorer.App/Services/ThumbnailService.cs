@@ -20,7 +20,11 @@ public sealed class ThumbnailService
     /// <summary>Pixel size requested (tiles show ~64 DIP; this stays sharp at 150% scale).</summary>
     public const int PixelSize = 128;
 
-    private const int MaxCached = 4000;
+    /// <summary>
+    /// Each decoded 128 px thumbnail holds ~64 KB of pixels, so the cap is what bounds memory: 1 500 ≈ 96 MB worst case
+    /// (4 000 was ~250 MB). Still several screens of tiles to scroll back to instantly.
+    /// </summary>
+    private const int MaxCached = 1500;
 
     private readonly Dictionary<string, ImageSource?> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _order = new();

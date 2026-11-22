@@ -111,6 +111,7 @@ public partial class App : Application
         services.AddSingleton<IShellActions, ShellActions>();
         services.AddSingleton<ShellMenuService>();
         services.AddSingleton<IShellMenuService>(sp => sp.GetRequiredService<ShellMenuService>());
+        services.AddSingleton<IArchiverService, ArchiverService>();
         services.AddSingleton<IListingCache>(_ => new ListingCache(capacity: 64));
 
         // Storage providers: cloud providers register here in Phase 3.

@@ -172,3 +172,45 @@ public class FormattingTests
         Assert.Equal(expected, Formatting.FormatSize(bytes, CultureInfo.InvariantCulture));
     }
 }
+
+public class ListingCacheBudgetTests
+{
+    private static StorageItem[] Items(int count) =>
+        Enumerable.Range(0, count).Select(i => new StorageItem { Name = $"f{i}.txt", Path = $@"C:\x\f{i}.txt", Kind = StorageItemKind.File }).ToArray();
+
+    [Fact]
+    public void Evicts_oldest_listings_past_the_item_budget_but_keeps_the_newest()
+    {
+        var cache = new ListingCache(capacity: 10, maxItems: 5);
+        var a = new StorageLocation("local", @"C:\a");
+        var b = new StorageLocation("local", @"C:\b");
+        var c = new StorageLocation("local", @"C:\c");
+
+        cache.Set(a, Items(3));
+        cache.Set(b, Items(2));
+        Assert.True(cache.TryGet(a, out _)); // a most recent, b oldest
+        cache.Set(c, Items(2)); // 7 > 5: b goes
+
+        Assert.False(cache.TryGet(b, out _));
+        Assert.True(cache.TryGet(a, out _));
+        Assert.True(cache.TryGet(c, out _));
+
+        cache.Set(b, Items(9)); // bigger than the whole budget: kept alone
+        Assert.True(cache.TryGet(b, out _));
+        Assert.False(cache.TryGet(a, out _));
+        Assert.False(cache.TryGet(c, out _));
+    }
+}
+
+public class StorageItemExtensionTests
+{
+    [Fact]
+    public void Extension_follows_name_and_kind_and_keeps_record_equality()
+    {
+        var file = new StorageItem { Name = "Photo.JPG", Path = @"C:\Photo.JPG", Kind = StorageItemKind.File };
+        Assert.Equal(".JPG", file.Extension);
+        Assert.Equal(".png", (file with { Name = "a.png" }).Extension);
+        Assert.Equal(string.Empty, (file with { Kind = StorageItemKind.Folder }).Extension);
+        Assert.Equal(file, new StorageItem { Name = "Photo.JPG", Path = @"C:\Photo.JPG", Kind = StorageItemKind.File });
+    }
+}

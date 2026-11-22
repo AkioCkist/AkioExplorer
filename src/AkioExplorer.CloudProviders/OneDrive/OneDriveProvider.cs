@@ -32,21 +32,35 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     private readonly IAccessTokenProvider _tokens;
     private readonly ConcurrentDictionary<string, string> _pathById = new();
 
-    public OneDriveProvider(CloudAccount account, HttpClient http, IAccessTokenProvider tokens)
-        : base(account, CloudProviderType.OneDrive)
+    private readonly string _graph;
+    private readonly string _drive;
+    private readonly string _service;
+
+    /// <param name="graphBase">Graph root ("https://graph.microsoft.com/v1.0"; the China cloud has its own).</param>
+    /// <param name="drive">"/me/drive", "/sites/{site-id}/drive" or "/drives/{drive-id}".</param>
+    public OneDriveProvider(CloudAccount account, HttpClient http, IAccessTokenProvider tokens, CloudProviderType type = CloudProviderType.OneDrive,
+        string serviceName = ServiceName, string graphBase = GraphBase, string drive = MyDrive)
+        : base(account, type)
     {
         _http = http;
         _tokens = tokens;
+        _graph = graphBase;
+        _drive = drive;
+        _service = serviceName;
     }
+
+    internal const string MyDrive = "/me/drive";
+
+    private string Ref(string path) => ItemRef(path, _drive);
 
     // ------------------------------------------------------------------ addressing
 
-    internal static string ItemRef(string path)
+    internal static string ItemRef(string path, string drive = MyDrive)
     {
         path = Normalize(path);
-        if (path.Length == 0) return "/me/drive/root";
+        if (path.Length == 0) return drive + "/root";
         var escaped = string.Join('/', path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
-        return $"/me/drive/root:/{escaped}:";
+        return $"{drive}/root:/{escaped}:";
     }
 
     // ------------------------------------------------------------------ listing
@@ -54,7 +68,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     public override async IAsyncEnumerable<IReadOnlyList<StorageItem>> ListAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         path = Normalize(path);
-        string? url = $"{GraphBase}{ItemRef(path)}/children?$top=999&$select={Select}";
+        string? url = $"{_graph}{Ref(path)}/children?$top=999&$select={Select}";
         bool any = false;
         while (url is not null)
         {
@@ -75,7 +89,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         path = Normalize(path);
         try
         {
-            using var json = await SendAsync(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}?$select={Select}", null, cancellationToken, path).ConfigureAwait(false);
+            using var json = await SendAsync(HttpMethod.Get, $"{_graph}{Ref(path)}?$select={Select}", null, cancellationToken, path).ConfigureAwait(false);
             return path.Length == 0 ? null : ToItem(json!.RootElement, path);
         }
         catch (StorageException ex) when (ex.Kind == StorageErrorKind.NotFound)
@@ -96,7 +110,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             ["@microsoft.graph.conflictBehavior"] = "fail",
         };
         string path = CombinePath(parentPath, name);
-        using var json = await SendAsync(HttpMethod.Post, $"{GraphBase}{ItemRef(parentPath)}/children", body, cancellationToken, path).ConfigureAwait(false);
+        using var json = await SendAsync(HttpMethod.Post, $"{_graph}{Ref(parentPath)}/children", body, cancellationToken, path).ConfigureAwait(false);
         return ToItem(json!.RootElement, path);
     }
 
@@ -104,7 +118,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     {
         EnsureValidName(newName);
         path = Normalize(path);
-        using var json = await SendAsync(HttpMethod.Patch, $"{GraphBase}{ItemRef(path)}", new JsonObject { ["name"] = newName }, cancellationToken, path)
+        using var json = await SendAsync(HttpMethod.Patch, $"{_graph}{Ref(path)}", new JsonObject { ["name"] = newName }, cancellationToken, path)
             .ConfigureAwait(false);
         return ToItem(json!.RootElement, CombinePath(GetParentPath(path) ?? string.Empty, newName));
     }
@@ -115,14 +129,14 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         {
             cancellationToken.ThrowIfCancellationRequested();
             string path = Normalize(raw);
-            if (path.Length == 0) throw new StorageException(StorageErrorKind.NotSupported, "The root of OneDrive can't be deleted.");
+            if (path.Length == 0) throw new StorageException(StorageErrorKind.NotSupported, $"The root of {DisplayName} can't be deleted.");
 
             if (permanent)
             {
                 try
                 {
                     // Work/school accounts only; personal OneDrive falls back to the recycle bin below.
-                    (await SendAsync(HttpMethod.Post, $"{GraphBase}{ItemRef(path)}/permanentDelete", null, cancellationToken, path).ConfigureAwait(false))?.Dispose();
+                    (await SendAsync(HttpMethod.Post, $"{_graph}{Ref(path)}/permanentDelete", null, cancellationToken, path).ConfigureAwait(false))?.Dispose();
                     continue;
                 }
                 catch (StorageException ex) when (ex.Kind is StorageErrorKind.NotSupported or StorageErrorKind.Unknown or StorageErrorKind.AccessDenied)
@@ -130,7 +144,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
                 }
             }
 
-            (await SendAsync(HttpMethod.Delete, $"{GraphBase}{ItemRef(path)}", null, cancellationToken, path).ConfigureAwait(false))?.Dispose();
+            (await SendAsync(HttpMethod.Delete, $"{_graph}{Ref(path)}", null, cancellationToken, path).ConfigureAwait(false))?.Dispose();
         }
     }
 
@@ -151,7 +165,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         }
 
         string q = Uri.EscapeDataString(query.NameText.Replace("'", "''"));
-        string? url = $"{GraphBase}{ItemRef(path)}/search(q='{q}')?$top=200&$select={Select}";
+        string? url = $"{_graph}{Ref(path)}/search(q='{q}')?$top=200&$select={Select}";
         while (url is not null)
         {
             using var json = await SendAsync(HttpMethod.Get, url, null, cancellationToken, path).ConfigureAwait(false);
@@ -169,7 +183,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
 
     public override async Task<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken)
     {
-        using var json = await SendAsync(HttpMethod.Get, $"{GraphBase}/me/drive?$select=quota", null, cancellationToken, string.Empty).ConfigureAwait(false);
+        using var json = await SendAsync(HttpMethod.Get, $"{_graph}{_drive}?$select=quota", null, cancellationToken, string.Empty).ConfigureAwait(false);
         if (!json!.RootElement.TryGetProperty("quota", out var quota)) return null;
         return new StorageQuota(
             quota.TryGetProperty("used", out var used) ? used.GetInt64() : null,
@@ -177,9 +191,9 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     }
 
     /// <summary>Signed-in user (used right after authentication).</summary>
-    internal static async Task<CloudIdentity> GetIdentityAsync(HttpClient http, string accessToken, CancellationToken cancellationToken)
+    internal static async Task<CloudIdentity> GetIdentityAsync(HttpClient http, string accessToken, CancellationToken cancellationToken, string graphBase = GraphBase)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{GraphBase}/me?$select=id,displayName,mail,userPrincipalName");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{graphBase}/me?$select=id,displayName,mail,userPrincipalName");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -199,6 +213,19 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     /// <summary>"/drive/root:/A/B" form used in parentReference.path.</summary>
     internal static string GraphParentPath(string parentPath) => "/drive/root:" + Normalize(parentPath);
 
+    /// <summary>The user's own drive takes a path; other drives (SharePoint libraries) want the folder's id.</summary>
+    private async Task<JsonObject> ParentReferenceAsync(string parentPath, CancellationToken cancellationToken)
+    {
+        if (_drive == MyDrive) return new JsonObject { ["path"] = GraphParentPath(parentPath) };
+        using var json = await SendAsync(HttpMethod.Get, $"{_graph}{Ref(parentPath)}?$select=id,parentReference", null, cancellationToken, parentPath)
+            .ConfigureAwait(false);
+        var root = json!.RootElement;
+        var reference = new JsonObject { ["id"] = root.GetProperty("id").GetString() };
+        if (root.TryGetProperty("parentReference", out var parent) && parent.TryGetProperty("driveId", out var driveId))
+            reference["driveId"] = driveId.GetString();
+        return reference;
+    }
+
     // ------------------------------------------------------------------ thumbnails
 
     private static readonly HashSet<string> DocumentThumbnailExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -214,7 +241,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     {
         string path = Normalize(file.Path);
         string rendition = size <= 176 ? "medium" : "large";
-        using var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}/thumbnails/0/{rendition}/content"),
+        using var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{_graph}{Ref(path)}/thumbnails/0/{rendition}/content"),
             authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode) return null; // 404: no thumbnail for this file
         var memory = new MemoryStream();
@@ -230,7 +257,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     public async Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken)
     {
         string path = Normalize(file.Path);
-        using var json = await SendAsync(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}?$select=id,@microsoft.graph.downloadUrl", null, cancellationToken, path)
+        using var json = await SendAsync(HttpMethod.Get, $"{_graph}{Ref(path)}?$select=id,@microsoft.graph.downloadUrl", null, cancellationToken, path)
             .ConfigureAwait(false);
         return json is not null && json.RootElement.TryGetProperty("@microsoft.graph.downloadUrl", out var url) && url.GetString() is { Length: > 0 } link
             ? new DirectDownload(link, new Dictionary<string, string> { ["User-Agent"] = "AkioExplorer" })
@@ -242,7 +269,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         string path = Normalize(file.Path);
         // /content answers with a redirect to a pre-authenticated download URL; HttpClient follows it and drops the
         // Authorization header on the way (it must not be sent to the download host).
-        var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{GraphBase}{ItemRef(path)}/content"),
+        var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Get, $"{_graph}{Ref(path)}/content"),
             authorize: true, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
@@ -262,7 +289,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             var data = new byte[length];
             int read = await content.ReadFullAsync(data, cancellationToken).ConfigureAwait(false);
             using var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Put,
-                    $"{GraphBase}{ItemRef(path)}/content?@microsoft.graph.conflictBehavior={behavior}")
+                    $"{_graph}{Ref(path)}/content?@microsoft.graph.conflictBehavior={behavior}")
                 { Content = new ByteArrayContent(data, 0, read) }, authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken)
                 .ConfigureAwait(false);
             string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -274,7 +301,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         // Upload session: chunks go straight to the pre-authenticated upload URL, each retried on its own.
         var sessionBody = new JsonObject { ["item"] = new JsonObject { ["@microsoft.graph.conflictBehavior"] = behavior } };
         string uploadUrl;
-        using (var session = await SendAsync(HttpMethod.Post, $"{GraphBase}{ItemRef(path)}/createUploadSession", sessionBody, cancellationToken, path)
+        using (var session = await SendAsync(HttpMethod.Post, $"{_graph}{Ref(path)}/createUploadSession", sessionBody, cancellationToken, path)
                    .ConfigureAwait(false))
         {
             uploadUrl = session!.RootElement.GetProperty("uploadUrl").GetString()!;
@@ -328,7 +355,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             }
             catch (HttpRequestException ex)
             {
-                throw new StorageException(StorageErrorKind.Unavailable, "The upload to OneDrive was interrupted. Check your connection.", ex);
+                throw new StorageException(StorageErrorKind.Unavailable, $"The upload to {_service} was interrupted. Check your connection.", ex);
             }
             await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), cancellationToken).ConfigureAwait(false);
         }
@@ -339,11 +366,11 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
     {
         string from = Normalize(source.Path);
         string target = CombinePath(parentPath, name);
-        var body = new JsonObject { ["parentReference"] = new JsonObject { ["path"] = GraphParentPath(parentPath) }, ["name"] = name };
+        var body = new JsonObject { ["parentReference"] = await ParentReferenceAsync(parentPath, cancellationToken).ConfigureAwait(false), ["name"] = name };
 
         string monitor;
         using (var response = await SendRawAsync(() => new HttpRequestMessage(HttpMethod.Post,
-                       $"{GraphBase}{ItemRef(from)}/copy?@microsoft.graph.conflictBehavior=fail") { Content = JsonContent.Create(body) },
+                       $"{_graph}{Ref(from)}/copy?@microsoft.graph.conflictBehavior=fail") { Content = JsonContent.Create(body) },
                    authorize: true, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false))
         {
             if (response.StatusCode != HttpStatusCode.Accepted || response.Headers.Location is null)
@@ -367,18 +394,18 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             if (state is "failed")
             {
                 string reason = root.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m) ? m.GetString() ?? "" : "";
-                throw new StorageException(StorageErrorKind.Unknown, $"OneDrive couldn't copy \"{source.Name}\". {reason}");
+                throw new StorageException(StorageErrorKind.Unknown, $"{_service} couldn't copy \"{source.Name}\". {reason}");
             }
         }
 
-        throw new StorageException(StorageErrorKind.Unavailable, $"OneDrive is still copying \"{source.Name}\". Check the folder later.");
+        throw new StorageException(StorageErrorKind.Unavailable, $"{_service} is still copying \"{source.Name}\". Check the folder later.");
     }
 
     public async Task<StorageItem?> MoveWithinAsync(StorageItem source, string parentPath, string name, CancellationToken cancellationToken)
     {
         string from = Normalize(source.Path);
-        var body = new JsonObject { ["parentReference"] = new JsonObject { ["path"] = GraphParentPath(parentPath) }, ["name"] = name };
-        using var json = await SendAsync(HttpMethod.Patch, $"{GraphBase}{ItemRef(from)}?@microsoft.graph.conflictBehavior=fail", body, cancellationToken, from)
+        var body = new JsonObject { ["parentReference"] = await ParentReferenceAsync(parentPath, cancellationToken).ConfigureAwait(false), ["name"] = name };
+        using var json = await SendAsync(HttpMethod.Patch, $"{_graph}{Ref(from)}?@microsoft.graph.conflictBehavior=fail", body, cancellationToken, from)
             .ConfigureAwait(false);
         return ToItem(json!.RootElement, CombinePath(parentPath, name));
     }
@@ -404,7 +431,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             catch (HttpRequestException ex)
             {
                 request.Dispose();
-                throw new StorageException(StorageErrorKind.Unavailable, "Can't reach OneDrive. Check your internet connection.", ex);
+                throw new StorageException(StorageErrorKind.Unavailable, $"Can't reach {_service}. Check your internet connection.", ex);
             }
 
             if (response.StatusCode == HttpStatusCode.Unauthorized && authorize && attempt == 0)
@@ -431,7 +458,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             {
                 if (!_pathById.TryGetValue(parentId, out var resolved))
                 {
-                    using var json = await SendAsync(HttpMethod.Get, $"{GraphBase}/me/drive/items/{Uri.EscapeDataString(parentId)}?$select=name,parentReference",
+                    using var json = await SendAsync(HttpMethod.Get, $"{_graph}{_drive}/items/{Uri.EscapeDataString(parentId)}?$select=name,parentReference",
                         null, cancellationToken, string.Empty).ConfigureAwait(false);
                     var parentElement = json!.RootElement;
                     resolved = parentElement.TryGetProperty("parentReference", out var grand) && grand.TryGetProperty("path", out var gp)
@@ -486,7 +513,7 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
             }
             catch (HttpRequestException ex)
             {
-                throw new StorageException(StorageErrorKind.Unavailable, "Can't reach OneDrive. Check your internet connection.", ex);
+                throw new StorageException(StorageErrorKind.Unavailable, $"Can't reach {_service}. Check your internet connection.", ex);
             }
 
             using (response)
@@ -521,15 +548,15 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         {
             HttpStatusCode.Unauthorized => new StorageException(StorageErrorKind.AuthenticationRequired,
                 $"The sign-in for \"{DisplayName}\" has expired. Reconnect the account to continue."),
-            HttpStatusCode.NotFound => new StorageException(StorageErrorKind.NotFound, $"Can't find {name} in OneDrive. It may have been moved or deleted."),
+            HttpStatusCode.NotFound => new StorageException(StorageErrorKind.NotFound, $"Can't find {name} in {_service}. It may have been moved or deleted."),
             HttpStatusCode.Conflict => new StorageException(StorageErrorKind.AlreadyExists, $"There's already an item named {name} here."),
             HttpStatusCode.Forbidden => new StorageException(StorageErrorKind.AccessDenied, $"You don't have permission to change {name}."),
-            HttpStatusCode.InsufficientStorage => new StorageException(StorageErrorKind.Unknown, "Your OneDrive is full."),
+            HttpStatusCode.InsufficientStorage => new StorageException(StorageErrorKind.Unknown, $"Your {_service} is full."),
             HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable => new StorageException(StorageErrorKind.Throttled,
-                "OneDrive is busy right now. Wait a moment and try again."),
+                $"{_service} is busy right now. Wait a moment and try again."),
             HttpStatusCode.BadRequest when code is "invalidRequest" or "notSupported" =>
-                new StorageException(StorageErrorKind.NotSupported, $"OneDrive doesn't support this: {message}"),
-            _ => new StorageException(StorageErrorKind.Unknown, $"OneDrive error ({(int)status}{(code.Length > 0 ? ", " + code : string.Empty)}): {message}"),
+                new StorageException(StorageErrorKind.NotSupported, $"{_service} doesn't support this: {message}"),
+            _ => new StorageException(StorageErrorKind.Unknown, $"{_service} error ({(int)status}{(code.Length > 0 ? ", " + code : string.Empty)}): {message}"),
         };
     }
 

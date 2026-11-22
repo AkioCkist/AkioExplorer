@@ -67,6 +67,7 @@ public sealed partial class FilePane : UserControl
         if (e.OldValue is FilePaneViewModel old)
         {
             old.SelectionRequested -= pane.OnSelectionRequested;
+            old.SelectionRestoreRequested -= pane.OnSelectionRestoreRequested;
             old.RenameRequested -= pane.OnRenameRequested;
             old.FocusListRequested -= pane.OnFocusListRequested;
             old.AddressEditRequested -= pane.OnAddressEditRequested;
@@ -79,6 +80,7 @@ public sealed partial class FilePane : UserControl
         if (e.NewValue is FilePaneViewModel vm)
         {
             vm.SelectionRequested += pane.OnSelectionRequested;
+            vm.SelectionRestoreRequested += pane.OnSelectionRestoreRequested;
             vm.RenameRequested += pane.OnRenameRequested;
             vm.FocusListRequested += pane.OnFocusListRequested;
             vm.AddressEditRequested += pane.OnAddressEditRequested;
@@ -161,6 +163,22 @@ public sealed partial class FilePane : UserControl
             return;
         }
 
+        SelectInList(list, items);
+        ViewModel.UpdateSelection(list.SelectedItems.OfType<FileItemViewModel>());
+        list.ScrollIntoView(items[0]);
+        if (ViewModel.IsActive) FocusItem(list, items[0], attempts: 3);
+    }
+
+    /// <summary>After the list was reset (filter typed): same selection, but no scrolling and no focus change.</summary>
+    private void OnSelectionRestoreRequested(object? sender, IReadOnlyList<FileItemViewModel> items)
+    {
+        if (ActiveList is not { } list || items.Count == 0) return;
+        SelectInList(list, items);
+        ViewModel.UpdateSelection(list.SelectedItems.OfType<FileItemViewModel>());
+    }
+
+    private void SelectInList(ListViewBase list, IReadOnlyList<FileItemViewModel> items)
+    {
         _syncingSelection = true;
         try
         {
@@ -193,10 +211,6 @@ public sealed partial class FilePane : UserControl
         {
             _syncingSelection = false;
         }
-
-        ViewModel.UpdateSelection(list.SelectedItems.OfType<FileItemViewModel>());
-        list.ScrollIntoView(items[0]);
-        if (ViewModel.IsActive) FocusItem(list, items[0], attempts: 3);
     }
 
     private void FocusItem(ListViewBase list, object item, int attempts)
