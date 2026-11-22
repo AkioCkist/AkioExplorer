@@ -47,33 +47,63 @@ public sealed class ShellActions : IShellActions
 
     public void RevealInExplorer(string path)
     {
-        string args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
-        Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true })?.Dispose();
+        if (File.Exists(path))
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true })?.Dispose();
+            return;
+        }
+        // Explorer's own "open in new window" verb: still File Explorer when AkioExplorer is the default file manager
+        // (plain "explorer.exe <folder>" would follow the default verb and come straight back here).
+        var info = new SHELLEXECUTEINFOW
+        {
+            cbSize = Marshal.SizeOf<SHELLEXECUTEINFOW>(),
+            fMask = SEE_MASK_INVOKEIDLIST,
+            lpVerb = "opennewwindow",
+            lpFile = path.Length == 0 ? "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}" : path, // empty = This PC
+            nShow = SW_SHOW,
+        };
+        if (!ShellExecuteEx(ref info))
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true })?.Dispose();
     }
 
-    public void OpenTerminal(string folder)
+    public void OpenTerminal(string folder, TerminalApp app = TerminalApp.WindowsTerminal)
     {
         if (!Directory.Exists(folder))
             throw new StorageException(StorageErrorKind.NotFound, "Open a folder first, then open the terminal there.");
 
-        // wt.exe is an app execution alias in %LocalAppData%\Microsoft\WindowsApps when Windows Terminal is installed.
-        string wt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe");
         try
         {
-            if (File.Exists(wt))
+            // wt.exe / pwsh.exe are app execution aliases in %LocalAppData%\Microsoft\WindowsApps when installed from the Store.
+            string aliases = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps");
+            if (app == TerminalApp.WindowsTerminal && File.Exists(Path.Combine(aliases, "wt.exe")))
             {
                 // ArgumentList quotes correctly, including a trailing backslash ("C:\").
-                var start = new ProcessStartInfo(wt) { UseShellExecute = false };
+                var start = new ProcessStartInfo(Path.Combine(aliases, "wt.exe")) { UseShellExecute = false };
                 start.ArgumentList.Add("-d");
                 start.ArgumentList.Add(folder);
                 Process.Start(start)?.Dispose();
                 return;
             }
-            Process.Start(new ProcessStartInfo("powershell.exe") { WorkingDirectory = folder, UseShellExecute = true })?.Dispose();
+
+            string exe = app switch
+            {
+                TerminalApp.PowerShell7 => FindPwsh(aliases) ?? "powershell.exe",
+                TerminalApp.CommandPrompt => "cmd.exe",
+                _ => "powershell.exe",
+            };
+            Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = folder, UseShellExecute = true })?.Dispose();
         }
         catch (Exception ex)
         {
             throw new StorageException(StorageErrorKind.Unknown, $"Couldn't open a terminal: {ex.Message}", ex);
         }
+    }
+
+    private static string? FindPwsh(string aliases)
+    {
+        string installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(installed)) return installed;
+        string alias = Path.Combine(aliases, "pwsh.exe");
+        return File.Exists(alias) ? alias : null;
     }
 }

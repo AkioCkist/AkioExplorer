@@ -18,6 +18,8 @@
     <SelfContained>true</SelfContained>
     <EnableMsixTooling>true</EnableMsixTooling>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Program.cs owns Main (single instance hand-off before XAML starts). -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <!-- Faster startup on release builds -->
     <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
     <TieredPGO>true</TieredPGO>

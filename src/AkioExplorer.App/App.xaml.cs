@@ -58,7 +58,16 @@ public partial class App : Application
         CleanOpenCache();
 
         _window = _services.GetRequiredService<MainWindow>();
-        _window.Activate();
+        var window = _window;
+        // Later launches (Win+E, double-clicked folders, "AkioExplorer ." in a terminal) arrive here.
+        SingleInstance.Listen(request => window.DispatcherQueue.TryEnqueue(() => window.HandleLaunch(request)));
+
+        var startup = Program.StartupRequest;
+        if (startup.Background) window.StartInBackground();
+        else
+        {
+            window.HandleLaunch(startup);
+        }
     }
 
     /// <summary>Files downloaded only to be opened are kept for a week.</summary>
@@ -100,6 +109,8 @@ public partial class App : Application
         services.AddSingleton<IKnownFoldersService, KnownFoldersService>();
         services.AddSingleton<IShellIconExtractor, ShellIconExtractor>();
         services.AddSingleton<IShellActions, ShellActions>();
+        services.AddSingleton<ShellMenuService>();
+        services.AddSingleton<IShellMenuService>(sp => sp.GetRequiredService<ShellMenuService>());
         services.AddSingleton<IListingCache>(_ => new ListingCache(capacity: 64));
 
         // Storage providers: cloud providers register here in Phase 3.

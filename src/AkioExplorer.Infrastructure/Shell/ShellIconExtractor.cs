@@ -107,7 +107,7 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
         }
     }
 
-    private static unsafe IconBitmap? ToBitmap(IntPtr hIcon)
+    internal static unsafe IconBitmap? ToBitmap(IntPtr hIcon)
     {
         if (!GetIconInfo(hIcon, out var iconInfo)) return null;
 

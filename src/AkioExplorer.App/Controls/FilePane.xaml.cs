@@ -44,6 +44,7 @@ public sealed partial class FilePane : UserControl
         InitializeComponent();
         BuildSearchChips();
         Root.AddHandler(PointerPressedEvent, new PointerEventHandler(OnRootPointerPressed), handledEventsToo: true);
+        SetUpHoldToRename();
         Root.GotFocus += (_, _) => ViewModel?.RequestActivation();
         SizeChanged += (_, e) =>
         {
@@ -366,6 +367,142 @@ public sealed partial class FilePane : UserControl
     private void OnRenameRequested(object? sender, FileItemViewModel vm)
     {
         ActiveList?.ScrollIntoView(vm);
+        // Grid tiles are ~100 px wide: rename there in a roomy popup instead (long names stay readable).
+        if (ViewModel.IsGridView)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => ShowRenamePopup(vm));
+    }
+
+    private void ShowRenamePopup(FileItemViewModel vm)
+    {
+        if (!vm.IsRenaming || TilesGrid is null) return;
+        TilesGrid.UpdateLayout();
+        var anchor = TilesGrid.ContainerFromItem(vm) as FrameworkElement ?? TilesGrid;
+
+        var box = new TextBox
+        {
+            Text = vm.EditName,
+            TextWrapping = TextWrapping.Wrap,
+            Width = 320,
+            MinHeight = 36,
+            FontSize = 14,
+            IsSpellCheckEnabled = false,
+            Header = vm.IsContainer ? "Folder name" : "File name",
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, "New name");
+        var hint = new TextBlock
+        {
+            Text = "Enter to rename  ·  Esc to cancel",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 400,
+        };
+
+        // ✓ and ✕ beside the box: confirm/cancel with the mouse too (Enter / Esc still work).
+        var confirm = new Button
+        {
+            Content = new FontIcon { Glyph = "", FontSize = 14 },
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        ToolTipService.SetToolTip(confirm, "Rename (Enter)");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(confirm, "Rename");
+        var cancel = new Button
+        {
+            Content = new FontIcon { Glyph = "", FontSize = 14 },
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Bottom,
+        };
+        ToolTipService.SetToolTip(cancel, "Cancel (Esc)");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cancel, "Cancel rename");
+
+        var row = new Grid { ColumnSpacing = 6 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(confirm, 1);
+        Grid.SetColumn(cancel, 2);
+        row.Children.Add(box);
+        row.Children.Add(confirm);
+        row.Children.Add(cancel);
+        // The default presenter caps width at 456 px including padding, which clipped the box: size it to the content.
+        var presenterStyle = new Style(typeof(FlyoutPresenter));
+        presenterStyle.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, 600.0));
+        presenterStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 10, 12, 10)));
+        var flyout = new Flyout
+        {
+            Content = new StackPanel { Spacing = 8, Children = { row, hint } },
+            // Starts at the tile's left edge and grows right (flips when there is no room), instead of centring
+            // a wide popup over the sidebar.
+            Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft,
+            FlyoutPresenterStyle = presenterStyle,
+        };
+
+        bool finished = false;
+        string? error = null;
+        _renamePopupBox = box;
+        box.TextChanged += (_, _) =>
+        {
+            vm.EditName = box.Text;
+            // Error prevention: say what's wrong while typing, before Enter.
+            error = Core.Logic.FileNameValidator.Validate(box.Text.Trim());
+            hint.Text = error ?? "Enter to rename  ·  Esc to cancel";
+            hint.Foreground = (Brush)Application.Current.Resources[error is null ? "TextFillColorSecondaryBrush" : "SystemFillColorCriticalBrush"];
+            confirm.IsEnabled = error is null;
+        };
+
+        async Task ConfirmAsync()
+        {
+            if (error is not null || finished) return; // keep the popup open until the name is valid
+            finished = true;
+            flyout.Hide();
+            await ViewModel.CommitRenameAsync(vm);
+        }
+
+        void Cancel()
+        {
+            if (finished) return;
+            finished = true;
+            flyout.Hide();
+            ViewModel.CancelRename(vm);
+        }
+
+        confirm.Click += async (_, _) => await ConfirmAsync();
+        cancel.Click += (_, _) => Cancel();
+        box.PreviewKeyDown += async (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter)
+            {
+                e.Handled = true;
+                await ConfirmAsync();
+            }
+            else if (e.Key == VirtualKey.Escape)
+            {
+                e.Handled = true;
+                Cancel();
+            }
+        };
+        flyout.Opened += (_, _) =>
+        {
+            box.Focus(FocusState.Keyboard);
+            // Select the name without the extension, like Explorer.
+            int dot = vm.IsContainer ? -1 : box.Text.LastIndexOf('.');
+            box.Select(0, dot > 0 ? dot : box.Text.Length);
+        };
+        flyout.Closed += async (_, _) =>
+        {
+            if (_renamePopupBox == box) _renamePopupBox = null;
+            if (finished || !vm.IsRenaming) return;
+            // Clicking elsewhere keeps the new name (Explorer behaviour), unless it's invalid.
+            if (error is null) await ViewModel.CommitRenameAsync(vm);
+            else ViewModel.CancelRename(vm);
+        };
+        flyout.ShowAt(anchor);
     }
 
     private void OnRenameBoxLoaded(object sender, RoutedEventArgs e)
@@ -394,8 +531,14 @@ public sealed partial class FilePane : UserControl
 
     private async void OnRenameBoxLostFocus(object sender, RoutedEventArgs e)
     {
-        if (sender is TextBox { DataContext: FileItemViewModel vm } && vm.IsRenaming)
-            await ViewModel.CommitRenameAsync(vm);
+        if (sender is not TextBox { DataContext: FileItemViewModel vm } || !vm.IsRenaming) return;
+        if (IsRenameProtected)
+        {
+            // Press-and-hold rename: the list took focus on mouse-up; keep editing instead of committing.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, FocusActiveRenameEditor);
+            return;
+        }
+        await ViewModel.CommitRenameAsync(vm);
     }
 
     // ------------------------------------------------------------------ context menus
@@ -405,27 +548,21 @@ public sealed partial class FilePane : UserControl
         var list = (ListViewBase)sender;
         var element = e.OriginalSource as FrameworkElement;
         var item = (element as SelectorItem)?.Content as FileItemViewModel ?? element?.DataContext as FileItemViewModel;
+        e.Handled = true;
 
-        MenuFlyout menu;
+        bool background = item is null;
         if (item is not null)
         {
             if (!list.SelectedItems.Contains(item)) list.SelectedItem = item;
-            ConfigureItemMenu();
-            menu = ItemMenu;
         }
         else
         {
             list.SelectedItems.Clear();
             ViewModel.UpdateSelection([]);
-            ConfigureBackgroundMenu();
-            menu = BackgroundMenu;
         }
 
-        if (e.TryGetPosition(list, out var point))
-            menu.ShowAt(list, new FlyoutShowOptions { Position = point });
-        else
-            menu.ShowAt(element ?? list);
-        e.Handled = true;
+        FlyoutShowOptions? options = e.TryGetPosition(list, out var point) ? new FlyoutShowOptions { Position = point } : null;
+        _ = ShowContextMenuAsync(list, element ?? list, options, background);
     }
 
     private void ConfigureItemMenu()
@@ -433,35 +570,56 @@ public sealed partial class FilePane : UserControl
         var selected = ViewModel.SelectedItems;
         bool single = selected.Count == 1;
         bool singleFolder = single && selected[0].IsContainer;
+        bool anyFolder = selected.Any(s => s.IsContainer);
         bool local = ViewModel.Provider is { } p && (p.Capabilities & StorageCapabilities.OpenWithShell) != 0;
-
-        MenuOpenOther.Visibility = selected.Any(s => s.IsContainer) ? Visibility.Visible : Visibility.Collapsed;
         bool dual = ViewModel.ShowActiveIndicator; // true only in dual-pane mode
-        MenuCopyOther.Visibility = dual ? Visibility.Visible : Visibility.Collapsed;
-        MenuMoveOther.Visibility = dual ? Visibility.Visible : Visibility.Collapsed;
-        MenuOpenWith.Visibility = single && !selected[0].IsContainer && local ? Visibility.Visible : Visibility.Collapsed;
-        MenuPinItem.Visibility = singleFolder ? Visibility.Visible : Visibility.Collapsed;
-        MenuPinItem.Text = ViewModel.IsSelectionFavorite ? "Unpin from Favorites" : "Pin to Favorites";
-        MenuReveal.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
-        MenuProperties.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
 
-        // Hick's law: only what applies to this selection.
-        MenuOpenTab.Visibility = Show(selected.Any(s => s.IsContainer));
+        // Top level (Hick's law: only what applies to this selection).
+        MenuOpenEditor.Visibility = Show(local && ViewModel.OpenInEditorCommand.CanExecute(null));
+        MenuOpenWith.Visibility = Show(local && selected.Count > 0 && !selected.Any(s => s.IsDrive));
         MenuRename.Visibility = Show(single);
+        MenuProperties.Visibility = Show(local);
+
+        // Open in ▸
+        MenuOpenTab.Visibility = Show(anyFolder);
+        MenuOpenOther.Visibility = Show(anyFolder);
+        MenuTerminal.Visibility = Show(local && singleFolder);
+        MenuReveal.Visibility = Show(local);
+        MenuReveal.Text = anyFolder ? "File Explorer" : "File Explorer (show file)";
+
+        // Organize ▸
         MenuBatchRename.Visibility = Show(ViewModel.BatchRenameCommand.CanExecute(null));
         MenuBatchRename.Text = single ? "Rename with options…" : $"Rename {selected.Count:N0} items…";
+        MenuFolderFromSelection.Visibility = Show(ViewModel.NewFolderFromSelectionCommand.CanExecute(null));
         MenuDuplicate.Visibility = Show(ViewModel.DuplicateCommand.CanExecute(null));
+        MenuPinItem.Visibility = Show(singleFolder);
+        MenuPinItem.Text = ViewModel.IsSelectionFavorite ? "Unpin from Favorites" : "Pin to Favorites";
+
+        // Archive ▸
         MenuCompress.Visibility = Show(ViewModel.CompressCommand.CanExecute(null));
         MenuExtractHere.Visibility = Show(ViewModel.ExtractHereCommand.CanExecute(null));
         MenuExtractFolder.Visibility = Show(ViewModel.ExtractToFolderCommand.CanExecute(null));
+
+        // Send to ▸ (Windows targets are added when the shell menu arrives)
+        MenuCopyOther.Visibility = Show(dual);
+        MenuMoveOther.Visibility = Show(dual);
+        MenuSendToSeparator.Visibility = Visibility.Collapsed;
+
+        // More tools ▸
         MenuChecksum.Visibility = Show(ViewModel.ChecksumCommand.CanExecute(null));
         MenuFolderSize.Visibility = Show(local && selected.Any(s => s.IsContainer && !s.IsDrive));
-        MenuTerminal.Visibility = Show(local && singleFolder);
+        MenuAttrSeparator.Visibility = Show(local);
         MenuHiddenAttr.Visibility = Show(local);
         MenuReadOnlyAttr.Visibility = Show(local);
         MenuHiddenAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.Hidden);
         MenuReadOnlyAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.ReadOnly);
+
+        foreach (var sub in new[] { MenuOpenIn, MenuOrganize, MenuArchive, MenuSendTo }) sub.Visibility = Show(HasVisibleItem(sub));
     }
+
+    /// <summary>A submenu with nothing usable inside is hidden rather than shown empty.</summary>
+    private static bool HasVisibleItem(MenuFlyoutSubItem sub) =>
+        sub.Items.Any(i => i is not MenuFlyoutSeparator && i.Visibility == Visibility.Visible);
 
     private static Visibility Show(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
@@ -484,6 +642,8 @@ public sealed partial class FilePane : UserControl
         MenuBgProperties.Visibility = local && hasPath ? Visibility.Visible : Visibility.Collapsed;
         MenuNewFile.Visibility = Show(ViewModel.IsLocalFolder);
         MenuBgTerminal.Visibility = Show(ViewModel.IsLocalFolder);
+        MenuBgEditor.Visibility = Show(ViewModel.IsLocalFolder);
+        MenuBgOpenIn.Visibility = Show(HasVisibleItem(MenuBgOpenIn));
         MenuBgSizes.Visibility = Show(ViewModel.IsLocalFolder);
     }
 

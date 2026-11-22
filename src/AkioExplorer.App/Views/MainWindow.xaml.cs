@@ -5,6 +5,7 @@ using AkioExplorer.App.Services;
 using AkioExplorer.App.ViewModels;
 using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -29,7 +30,11 @@ public sealed partial class MainWindow : Window
     private const string HistoryTag = "transfer-history";
     private NavigationViewItem? _transfersItem;
     private bool _initialized;
+    private bool _ready;
     private bool _syncingNav;
+    private TrayIcon? _tray;
+    private bool _exitRequested;
+    private LaunchRequest? _pendingLaunch;
 
     public MainWindow(MainViewModel viewModel, ISettingsService settings, ThemeService theme, DialogService dialogs, FavoritesService favorites, ILogger<MainWindow> logger, CloudAccountsViewModel cloud)
     {
@@ -53,6 +58,7 @@ public sealed partial class MainWindow : Window
 
         _theme.Attach(RootGrid, AppWindow);
         RestorePlacement();
+        App.Services.GetRequiredService<AkioExplorer.Infrastructure.Shell.ShellMenuService>().OwnerWindow = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
         RootGrid.Loaded += OnRootLoaded;
         RootGrid.SizeChanged += (_, _) => UpdateContentWidth();
@@ -88,6 +94,9 @@ public sealed partial class MainWindow : Window
             pane.ReconnectRequested += async (sender, providerId) => await ReconnectAsync(providerId, (FilePaneViewModel)sender!);
         }
         BuildSidebar();
+        _settings.Changed += (_, _) => DispatcherQueue.TryEnqueue(OnIntegrationSettingsChanged);
+        if (_settings.Current.KeepRunningInBackground) EnsureTray();
+        ApplyBackdrop();
     }
 
     public MainViewModel ViewModel { get; }
@@ -102,6 +111,114 @@ public sealed partial class MainWindow : Window
 
         await ViewModel.InitializeAsync();
         LeftPaneView.FocusList();
+        _ready = true;
+        if (_pendingLaunch is { Path: not null } pending)
+        {
+            _pendingLaunch = null;
+            await OpenExternalAsync(pending.Path!);
+        }
+        _ = WarmUpShellMenusAsync();
+    }
+
+    // ------------------------------------------------------------------ launches from outside, background mode
+
+    /// <summary>Sign-in autostart: no window yet, just the notification-area icon (the window is built on first open).</summary>
+    public void StartInBackground() => EnsureTray();
+
+    /// <summary>A launch request from this process or a later one: show the window and open the requested folder.</summary>
+    public void HandleLaunch(LaunchRequest request)
+    {
+        if (request.Background && request.Path is null)
+        {
+            EnsureTray();
+            return;
+        }
+        if (request.Path is { } path)
+        {
+            if (_ready) _ = OpenExternalAsync(path);
+            else _pendingLaunch = request;
+        }
+        ShowAndActivate();
+    }
+
+    private async Task OpenExternalAsync(string path)
+    {
+        ShowExplorer();
+        bool newTab = _settings.Current.ExternalOpenTarget == ExternalOpenTarget.NewTab;
+        await ViewModel.ActivePane.OpenExternalAsync(path, newTab);
+        ViewFor(ViewModel.ActivePane).FocusList();
+    }
+
+    public void ShowAndActivate()
+    {
+        AppWindow.Show();
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+        Activate();
+        SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    }
+
+    private void EnsureTray()
+    {
+        _tray ??= new TrayIcon(ShowAndActivate, ExitApp);
+        _tray.Show();
+    }
+
+    /// <summary>Tray › Exit: really quit, even with "keep running in the background" on.</summary>
+    private void ExitApp()
+    {
+        _exitRequested = true;
+        Close();
+    }
+
+    private void OnIntegrationSettingsChanged()
+    {
+        if (_settings.Current.KeepRunningInBackground) EnsureTray();
+        else _tray?.Hide();
+        ApplyBackdrop();
+    }
+
+    private WindowBackdrop _appliedBackdrop = WindowBackdrop.Mica; // MainWindow.xaml starts with Mica
+
+    /// <summary>Settings › Appearance › Window background.</summary>
+    private void ApplyBackdrop()
+    {
+        var wanted = _settings.Current.Backdrop;
+        if (wanted == _appliedBackdrop) return;
+        _appliedBackdrop = wanted;
+        SystemBackdrop = wanted switch
+        {
+            WindowBackdrop.MicaAlt => new Microsoft.UI.Xaml.Media.MicaBackdrop { Kind = Microsoft.UI.Composition.SystemBackdrops.MicaKind.BaseAlt },
+            WindowBackdrop.Acrylic => new Microsoft.UI.Xaml.Media.DesktopAcrylicBackdrop(),
+            WindowBackdrop.Solid => null,
+            _ => new Microsoft.UI.Xaml.Media.MicaBackdrop(),
+        };
+        if (wanted == WindowBackdrop.Solid)
+            RootGrid.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ApplicationPageBackgroundThemeBrush"];
+        else
+            RootGrid.ClearValue(Microsoft.UI.Xaml.Controls.Panel.BackgroundProperty);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    /// <summary>
+    /// Loads shell extension DLLs once in the background, so the first right-click opens as fast as later ones.
+    /// </summary>
+    private static async Task WarmUpShellMenusAsync()
+    {
+        await Task.Delay(1500);
+        try
+        {
+            var shell = App.Services.GetRequiredService<IShellMenuService>();
+            _ = shell.GetCodeEditorsAsync();
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            (await shell.GetBackgroundMenuAsync(home, extended: false))?.Dispose();
+        }
+        catch
+        {
+            // Best effort only.
+        }
     }
 
     private async void OnActivated(object sender, WindowActivatedEventArgs args)
@@ -123,6 +240,16 @@ public sealed partial class MainWindow : Window
         SavePlacement();
         ViewModel.SaveState();
         _settings.Flush();
+        if (!_exitRequested && _settings.Current.KeepRunningInBackground)
+        {
+            // Stay alive in the notification area so the next Win+E / folder opens instantly.
+            args.Cancel = true;
+            EnsureTray();
+            AppWindow.Hide();
+            return;
+        }
+        _tray?.Dispose();
+        _tray = null;
         // Jobs still running are kept as "Interrupted" in Recent transfers so they can be retried next time.
         if (App.Services.GetService(typeof(Infrastructure.Settings.JsonTransferHistory)) is Infrastructure.Settings.JsonTransferHistory history)
             history.RecordInterrupted();
@@ -902,6 +1029,8 @@ public sealed partial class MainWindow : Window
     private void OnFolderSizesAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.CalculateFolderSizesCommand.Execute(null));
 
     private void OnTerminalAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.OpenTerminalCommand.Execute(null));
+
+    private void OnEditorAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.OpenInEditorCommand.Execute(null));
 
     private void OnHiddenItemsAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
     {

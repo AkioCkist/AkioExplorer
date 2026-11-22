@@ -35,6 +35,9 @@ public sealed partial class FileItemViewModel : ObservableObject
     }
 
     public void RefreshDisplayName() => OnPropertyChanged(nameof(DisplayName));
+
+    /// <summary>Re-formats size and date after the size-unit or date setting changed.</summary>
+    public void RefreshFormatting() => RefreshText();
     [ObservableProperty] private string _sizeText = string.Empty;
     [ObservableProperty] private string _modifiedText = string.Empty;
     [ObservableProperty] private string _secondaryText;
@@ -141,6 +144,6 @@ public sealed partial class FileItemViewModel : ObservableObject
             StorageItemKind.Drive when item.TotalSize is not null => $"{Formatting.FormatSize(item.FreeSpace ?? 0)} free",
             _ => string.Empty,
         };
-        ModifiedText = item.Modified is { } modified ? modified.LocalDateTime.ToString("g") : string.Empty;
+        ModifiedText = item.Modified is { } modified ? Formatting.FormatDate(modified) : string.Empty;
     }
 }

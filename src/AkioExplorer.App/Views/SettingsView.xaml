@@ -8,118 +8,282 @@
     xmlns:conv="using:AkioExplorer.App.Converters"
     xmlns:vm="using:AkioExplorer.App.ViewModels">
 
-    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
-        <StackPanel x:Name="Body" Padding="32,24,32,32" Spacing="4" HorizontalAlignment="Stretch">
-            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,20" />
+    <!-- OneCommander-style: categories on the left, a search box that finds any setting, sections on the right. -->
+    <Grid x:Name="Layout" ColumnSpacing="8">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-            <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,0,0,4" />
-            <controls:SettingRow Glyph="&#xE790;" Header="App theme" Description="Light, Dark, or follow your Windows setting.">
-                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" AutomationProperties.Name="App theme">
-                    <x:String>Use system setting</x:String>
-                    <x:String>Light</x:String>
-                    <x:String>Dark</x:String>
-                </ComboBox>
-            </controls:SettingRow>
-
-            <TextBlock Text="Browsing" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
-            <controls:SettingRow Glyph="&#xE8FD;" Header="Default view for new panes" Description="You can still switch any pane with Ctrl+Shift+6 (Details) or Ctrl+Shift+2 (Grid).">
-                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.DefaultViewIndex, Mode=TwoWay}" AutomationProperties.Name="Default view">
-                    <x:String>Details</x:String>
-                    <x:String>Grid</x:String>
-                </ComboBox>
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xE8A4;" Header="Open in dual-pane mode" Description="Show two panes side by side when AkioExplorer starts (toggle any time with Ctrl+Shift+D).">
-                <ToggleSwitch IsOn="{x:Bind ViewModel.DualPaneOnStartup, Mode=TwoWay}" AutomationProperties.Name="Open in dual-pane mode" />
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xE81C;" Header="Reopen last folders" Description="Start where you left off in each pane.">
-                <ToggleSwitch IsOn="{x:Bind ViewModel.RestoreLastLocations, Mode=TwoWay}" AutomationProperties.Name="Reopen last folders" />
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xED1A;" Header="Show hidden items" Description="Hidden files and folders appear dimmed.">
-                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowHiddenItems, Mode=TwoWay}" AutomationProperties.Name="Show hidden items" />
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xE8AC;" Header="Show file name extensions" Description="Show .txt, .jpg and so on after file names.">
-                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowFileExtensions, Mode=TwoWay}" AutomationProperties.Name="Show file name extensions" />
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xEDA2;" Header="Calculate folder sizes automatically" Description="Fill the Size column for folders on this PC as you browse. Uses some disk activity on big folders.">
-                <ToggleSwitch IsOn="{x:Bind ViewModel.AutoFolderSizes, Mode=TwoWay}" AutomationProperties.Name="Calculate folder sizes automatically" />
-            </controls:SettingRow>
-
-            <TextBlock Text="Cloud accounts" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
-            <ItemsControl ItemsSource="{x:Bind Cloud.Accounts}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:CloudAccountItem">
-                        <Border MinHeight="64" Padding="16,10" Margin="0,0,0,4" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1"
-                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
-                            <Grid ColumnSpacing="16">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Image Width="24" Height="24" VerticalAlignment="Center">
-                                    <Image.Source>
-                                        <SvgImageSource UriSource="{x:Bind IconUri}" />
-                                    </Image.Source>
-                                </Image>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="{x:Bind Name}" />
-                                    <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <ProgressBar Value="{x:Bind QuotaPercent, Mode=OneWay}" Maximum="100" MaxWidth="260" HorizontalAlignment="Left" Margin="0,4,0,0"
-                                                 Visibility="{x:Bind conv:XamlHelpers.Visible(HasQuota), Mode=OneWay}" />
-                                    <TextBlock Text="{x:Bind QuotaText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <Button Content="Rename" Click="OnRenameAccount" Tag="{x:Bind}" />
-                                    <Button Content="Disconnect" Click="OnDisconnectAccount" Tag="{x:Bind}" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <controls:SettingRow Glyph="&#xE753;" Header="Add a cloud account" Description="Google Drive, Dropbox or OneDrive. You sign in in your browser; tokens are kept in Windows Credential Manager.">
-                <Button Content="Add account" Style="{StaticResource AccentButtonStyle}" Click="OnAddAccount" />
-            </controls:SettingRow>
-
-            <TextBlock Text="Copy and move" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
-            <controls:SettingRow Glyph="&#xE8C8;" Header="When a file with the same name exists" Description="Ask shows both files so you can compare size and date.">
-                <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.ConflictBehaviorIndex, Mode=TwoWay}" AutomationProperties.Name="Conflict behavior">
-                    <x:String>Ask me</x:String>
-                    <x:String>Replace</x:String>
-                    <x:String>Skip</x:String>
-                    <x:String>Keep both</x:String>
-                </ComboBox>
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xE896;" Header="Download folder" Description="{x:Bind ViewModel.DownloadFolderText, Mode=OneWay}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="Change…" Click="OnChangeDownloadFolder" />
-                    <Button Content="Reset" Click="OnResetDownloadFolder" ToolTipService.ToolTip="Use the Windows Downloads folder" />
-                </StackPanel>
-            </controls:SettingRow>
-            <controls:SettingRow Glyph="&#xE9F5;" Header="Simultaneous operations" Description="How many copy or move jobs run at the same time. Others wait in line.">
-                <NumberBox Minimum="1" Maximum="8" SpinButtonPlacementMode="Compact" MinWidth="120"
-                           Value="{x:Bind ViewModel.MaxSimultaneousOperations, Mode=TwoWay}" AutomationProperties.Name="Simultaneous operations" />
-            </controls:SettingRow>
-
-            <TextBlock Text="Favorites" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
-            <TextBlock Text="No favorites yet. Right-click a folder and choose Pin to Favorites."
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,4"
-                       Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasFavorites)}" />
-            <ItemsControl ItemsSource="{x:Bind ViewModel.Favorites}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="models:FavoriteEntry">
-                        <controls:SettingRow Glyph="&#xE734;" Header="{x:Bind Name}" Description="{x:Bind Path}" Margin="0,0,0,4">
-                            <Button Content="Remove" Click="OnRemoveFavorite" Tag="{x:Bind}" />
-                        </controls:SettingRow>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
-            <controls:SettingRow Glyph="&#xE946;" Header="AkioExplorer" Description="{x:Bind ViewModel.Version}">
-                <Button Content="Open app data folder" Command="{x:Bind ViewModel.OpenDataFolderCommand}"
-                        ToolTipService.ToolTip="{x:Bind ViewModel.DataFolder}" />
-            </controls:SettingRow>
+        <StackPanel Padding="16,24,0,16" Spacing="12">
+            <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="8,0,0,4" />
+            <AutoSuggestBox x:Name="SearchBox" PlaceholderText="Find a setting" QueryIcon="Find"
+                            TextChanged="OnSearchChanged" AutomationProperties.Name="Find a setting" />
+            <ListView x:Name="Categories" SelectionMode="Single" SelectionChanged="OnCategoryChanged" AutomationProperties.Name="Setting categories">
+                <ListViewItem Tag="General">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE713;" FontSize="16" /><TextBlock Text="General" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Appearance">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE790;" FontSize="16" /><TextBlock Text="Appearance" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Files">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8B7;" FontSize="16" /><TextBlock Text="Files and folders" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Menus">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE700;" FontSize="16" /><TextBlock Text="Menus and apps" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Windows">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE782;" FontSize="16" /><TextBlock Text="Windows integration" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Transfers">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8C8;" FontSize="16" /><TextBlock Text="Copy and move" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Cloud">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE753;" FontSize="16" /><TextBlock Text="Cloud accounts" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Favorites">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE734;" FontSize="16" /><TextBlock Text="Favorites" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="About">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE946;" FontSize="16" /><TextBlock Text="About" /></StackPanel>
+                </ListViewItem>
+            </ListView>
         </StackPanel>
-    </ScrollViewer>
+
+        <ScrollViewer x:Name="Scroller" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
+            <StackPanel x:Name="Body" Padding="16,24,32,32" Spacing="4" HorizontalAlignment="Left">
+                <TextBlock x:Name="NoMatches" Text="No setting matches that. Try another word, such as theme, hidden, terminal or Win+E."
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
+
+                <!-- ============================================================ General -->
+                <StackPanel x:Name="SectionGeneral" Tag="General" Spacing="4">
+                    <TextBlock Text="General" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE81C;" Header="Reopen last folders" Description="Start where you left off in each pane, with all tabs.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.RestoreLastLocations, Mode=TwoWay}" AutomationProperties.Name="Reopen last folders" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8A4;" Header="Open in dual-pane mode" Description="Show two panes side by side when AkioExplorer starts (toggle any time with Ctrl+Shift+D).">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.DualPaneOnStartup, Mode=TwoWay}" AutomationProperties.Name="Open in dual-pane mode" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8FD;" Header="Default view for new panes" Description="Switch any pane with Ctrl+Shift+6 (Details) or Ctrl+Shift+2 (Grid).">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.DefaultViewIndex, Mode=TwoWay}" AutomationProperties.Name="Default view">
+                            <x:String>Details</x:String>
+                            <x:String>Grid</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE74D;" Header="Ask before deleting" Description="Confirm before moving items to the Recycle Bin. Permanent delete (Shift+Del) always asks.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ConfirmRecycle, Mode=TwoWay}" AutomationProperties.Name="Ask before deleting" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Appearance -->
+                <StackPanel x:Name="SectionAppearance" Tag="Appearance" Spacing="4">
+                    <TextBlock Text="Appearance" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE790;" Header="App theme" Description="Light, Dark, or follow your Windows setting.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}" AutomationProperties.Name="App theme">
+                            <x:String>Use system setting</x:String>
+                            <x:String>Light</x:String>
+                            <x:String>Dark</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE771;" Header="Window background" Description="Mica tints with your wallpaper, Acrylic is see-through, Solid is plain and uses the least GPU.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.BackdropIndex, Mode=TwoWay}" AutomationProperties.Name="Window background">
+                            <x:String>Mica</x:String>
+                            <x:String>Mica Alt (stronger tint)</x:String>
+                            <x:String>Acrylic (translucent)</x:String>
+                            <x:String>Solid</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Files and folders -->
+                <StackPanel x:Name="SectionFiles" Tag="Files" Spacing="4">
+                    <TextBlock Text="Files and folders" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xED1A;" Header="Show hidden items" Description="Hidden files and folders appear dimmed (Ctrl+H).">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ShowHiddenItems, Mode=TwoWay}" AutomationProperties.Name="Show hidden items" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8AC;" Header="Show file name extensions" Description="Show .txt, .jpg and so on after file names.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ShowFileExtensions, Mode=TwoWay}" AutomationProperties.Name="Show file name extensions" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE7B3;" Header="Treat dot files as hidden" Description="Names starting with a dot (.git, .godot, .vscode) count as hidden items, like on Linux and macOS.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.TreatDotFilesAsHidden, Mode=TwoWay}" AutomationProperties.Name="Treat dot files as hidden" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE894;" Header="Hide temporary files" Description="Never list Office lock files (~$…), *.tmp, Thumbs.db and desktop.ini, even when hidden items are shown.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.HideJunkFiles, Mode=TwoWay}" AutomationProperties.Name="Hide temporary files" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE787;" Header="Date format" Description="How the Date modified column is written. Relative shows age: 5 min ago, 3 h ago, 2 days ago.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.DateDisplayIndex, Mode=TwoWay}" AutomationProperties.Name="Date format">
+                            <x:String>Windows setting</x:String>
+                            <x:String>22-11-2026  14:23</x:String>
+                            <x:String>2026-11-22  14:23</x:String>
+                            <x:String>11/22/2026  2:23 PM</x:String>
+                            <x:String>Relative (3 h ago)</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE9D9;" Header="Size units" Description="Windows counts 1 KB as 1024 bytes; drive makers and macOS use 1000.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.SizeUnitsIndex, Mode=TwoWay}" AutomationProperties.Name="Size units">
+                            <x:String>1 KB = 1024 bytes</x:String>
+                            <x:String>1 KB = 1000 bytes</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xEDA2;" Header="Calculate folder sizes automatically" Description="Fill the Size column for folders on this PC as you browse. Uses some disk activity on big folders.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.AutoFolderSizes, Mode=TwoWay}" AutomationProperties.Name="Calculate folder sizes automatically" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Menus and apps -->
+                <StackPanel x:Name="SectionMenus" Tag="Menus" Spacing="4">
+                    <TextBlock Text="Menus and apps" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE943;" Header="Code editor" Description="Used by Open in editor (Ctrl+Shift+E) for files and folders. Editors found on this PC are listed.">
+                        <ComboBox MinWidth="200" ItemsSource="{x:Bind ViewModel.EditorNames}" SelectedIndex="{x:Bind ViewModel.EditorIndex, Mode=TwoWay}" AutomationProperties.Name="Code editor" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE756;" Header="Terminal" Description="Opened by Open in Terminal (Ctrl+Alt+T) in the current folder.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.TerminalIndex, Mode=TwoWay}" AutomationProperties.Name="Terminal">
+                            <x:String>Windows Terminal</x:String>
+                            <x:String>PowerShell 7</x:String>
+                            <x:String>Windows PowerShell</x:String>
+                            <x:String>Command Prompt</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8C8;" Header="Copy path format" Description="What Copy path (Ctrl+Shift+C) puts on the clipboard.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.CopyPathFormatIndex, Mode=TwoWay}" AutomationProperties.Name="Copy path format">
+                            <x:String>"C:\My Files\a.txt"</x:String>
+                            <x:String>C:\My Files\a.txt</x:String>
+                            <x:String>C:/My Files/a.txt</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE700;" Header="Show Windows menu items" Description="Add items from installed apps (7-Zip, WinRAR, Git, VLC, Send to…) to the right-click menu. Hold Shift for extra items.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ShowShellMenuItems, Mode=TwoWay}" AutomationProperties.Name="Show Windows menu items" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8D8;" Header="Hide these menu items" Description="Names exactly as shown in the menu, separated by commas. Example: Give access to, Restore previous versions">
+                        <TextBox MinWidth="260" MaxWidth="320" Text="{x:Bind ViewModel.HiddenShellMenuItems, Mode=TwoWay}" PlaceholderText="Share, Give access to"
+                                 AutomationProperties.Name="Hidden menu items" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Windows integration -->
+                <StackPanel x:Name="SectionWindows" Tag="Windows" Spacing="4">
+                    <TextBlock Text="Windows integration" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xEC50;" Header="Use AkioExplorer instead of File Explorer"
+                                         Description="Folders and drives you open anywhere in Windows, and Win+E, open here. File Explorer stays available as Open in File Explorer. Turning this off restores the previous file manager.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ReplaceFileExplorer, Mode=TwoWay}" AutomationProperties.Name="Use AkioExplorer instead of File Explorer" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8A7;" Header="&quot;Open in AkioExplorer&quot; in the Windows menu" Description="Right-click a folder, a drive or a folder background in File Explorer or on the desktop.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.ContextMenuEntry, Mode=TwoWay}" AutomationProperties.Name="Open in AkioExplorer menu item" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8A9;" Header="Open folders from other apps in" Description="Where a folder opened from Windows (Win+E, the desktop, another app) appears. A tab already showing it is reused.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.ExternalOpenIndex, Mode=TwoWay}" AutomationProperties.Name="Open folders from other apps in">
+                            <x:String>A new tab</x:String>
+                            <x:String>The current tab</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE7E8;" Header="Keep running in the background" Description="Closing the window keeps AkioExplorer in the notification area, so the next folder opens instantly. Exit from the icon's menu.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.KeepRunningInBackground, Mode=TwoWay}" AutomationProperties.Name="Keep running in the background" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE7B5;" Header="Start with Windows" Description="Start hidden in the notification area when you sign in (turns on Keep running in the background).">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.StartWithWindows, Mode=TwoWay}" AutomationProperties.Name="Start with Windows" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE756;" Header="Open from the command line" Description="Add AkioExplorer to your user PATH, then type AkioExplorer . in any new terminal.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.OnPath, Mode=TwoWay}" AutomationProperties.Name="Add to PATH" />
+                    </controls:SettingRow>
+                    <TextBlock Text="{x:Bind ViewModel.IntegrationMessage, Mode=OneWay}" TextWrapping="Wrap" Margin="4,4,0,0"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock TextWrapping="Wrap" Margin="4,4,0,0" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}">
+                        <Run Text="Registered program:" />
+                        <Run Text="{x:Bind ViewModel.ExecutablePath}" />
+                        <LineBreak />
+                        <Run Text="If you move AkioExplorer to another folder, turn these off and on again." />
+                    </TextBlock>
+                </StackPanel>
+
+                <!-- ============================================================ Copy and move -->
+                <StackPanel x:Name="SectionTransfers" Tag="Transfers" Spacing="4">
+                    <TextBlock Text="Copy and move" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE8C8;" Header="When a file with the same name exists" Description="Ask shows both files so you can compare size and date.">
+                        <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.ConflictBehaviorIndex, Mode=TwoWay}" AutomationProperties.Name="Conflict behavior">
+                            <x:String>Ask me</x:String>
+                            <x:String>Replace</x:String>
+                            <x:String>Skip</x:String>
+                            <x:String>Keep both</x:String>
+                        </ComboBox>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE896;" Header="Download folder" Description="{x:Bind ViewModel.DownloadFolderText, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Change…" Click="OnChangeDownloadFolder" />
+                            <Button Content="Reset" Click="OnResetDownloadFolder" ToolTipService.ToolTip="Use the Windows Downloads folder" />
+                        </StackPanel>
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE9F5;" Header="Simultaneous operations" Description="How many copy or move jobs run at the same time. Others wait in line.">
+                        <NumberBox Minimum="1" Maximum="8" SpinButtonPlacementMode="Compact" MinWidth="120"
+                                   Value="{x:Bind ViewModel.MaxSimultaneousOperations, Mode=TwoWay}" AutomationProperties.Name="Simultaneous operations" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Cloud accounts -->
+                <StackPanel x:Name="SectionCloud" Tag="Cloud" Spacing="4">
+                    <TextBlock Text="Cloud accounts" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <ItemsControl ItemsSource="{x:Bind Cloud.Accounts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:CloudAccountItem">
+                                <Border MinHeight="64" Padding="16,10" Margin="0,0,0,4" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                                    <Grid ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Image Width="24" Height="24" VerticalAlignment="Center">
+                                            <Image.Source>
+                                                <SvgImageSource UriSource="{x:Bind IconUri}" />
+                                            </Image.Source>
+                                        </Image>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                            <TextBlock Text="{x:Bind Name}" />
+                                            <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ProgressBar Value="{x:Bind QuotaPercent, Mode=OneWay}" Maximum="100" MaxWidth="260" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                                         Visibility="{x:Bind conv:XamlHelpers.Visible(HasQuota), Mode=OneWay}" />
+                                            <TextBlock Text="{x:Bind QuotaText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <Button Content="Rename" Click="OnRenameAccount" Tag="{x:Bind}" />
+                                            <Button Content="Disconnect" Click="OnDisconnectAccount" Tag="{x:Bind}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <controls:SettingRow Glyph="&#xE753;" Header="Add a cloud account" Description="Google Drive, Dropbox or OneDrive. You sign in in your browser; tokens are kept in Windows Credential Manager.">
+                        <Button Content="Add account" Style="{StaticResource AccentButtonStyle}" Click="OnAddAccount" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Favorites -->
+                <StackPanel x:Name="SectionFavorites" Tag="Favorites" Spacing="4">
+                    <TextBlock Text="Favorites" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <TextBlock Text="No favorites yet. Right-click a folder and choose Pin to Favorites."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,4"
+                               Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasFavorites)}" />
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Favorites}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:FavoriteEntry">
+                                <controls:SettingRow Glyph="&#xE734;" Header="{x:Bind Name}" Description="{x:Bind Path}" Margin="0,0,0,4">
+                                    <Button Content="Remove" Click="OnRemoveFavorite" Tag="{x:Bind}" />
+                                </controls:SettingRow>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- ============================================================ About -->
+                <StackPanel x:Name="SectionAbout" Tag="About" Spacing="4">
+                    <TextBlock Text="About" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE946;" Header="AkioExplorer" Description="{x:Bind ViewModel.Version}">
+                        <Button Content="Open app data folder" Command="{x:Bind ViewModel.OpenDataFolderCommand}"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.DataFolder}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
 </UserControl>

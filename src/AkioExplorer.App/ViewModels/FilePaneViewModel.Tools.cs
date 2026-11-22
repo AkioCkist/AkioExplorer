@@ -49,13 +49,22 @@ public sealed partial class FilePaneViewModel
         ToggleHiddenAttributeCommand.NotifyCanExecuteChanged();
         ToggleReadOnlyAttributeCommand.NotifyCanExecuteChanged();
         OpenTerminalCommand.NotifyCanExecuteChanged();
+        OpenInEditorCommand.NotifyCanExecuteChanged();
+        NewFolderFromSelectionCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsLocalFolder));
     }
 
     private void OnSettingsChanged()
     {
         FileItemViewModel.ShowExtensions = _settings.Current.ShowFileExtensions;
-        foreach (var vm in _all) vm.RefreshDisplayName();
+        bool formatChanged = Formatting.DecimalUnits != _settings.Current.DecimalSizeUnits || Formatting.DateDisplay != _settings.Current.DateDisplay;
+        Formatting.DecimalUnits = _settings.Current.DecimalSizeUnits;
+        Formatting.DateDisplay = _settings.Current.DateDisplay;
+        foreach (var vm in _all)
+        {
+            vm.RefreshDisplayName();
+            if (formatChanged) vm.RefreshFormatting();
+        }
         ApplyView(replace: false);
         StartAutoFolderSizes();
     }
@@ -181,7 +190,129 @@ public sealed partial class FilePaneViewModel
         if (string.IsNullOrEmpty(folder)) return;
         try
         {
-            _shellActions.OpenTerminal(folder);
+            _shellActions.OpenTerminal(folder, _settings.Current.Terminal);
+        }
+        catch (StorageException ex)
+        {
+            ShowStorageError(ex);
+        }
+    }
+
+    // ------------------------------------------------------------------ code editors, open with, shell menu
+
+    /// <summary>Shell context menus, "Open with" apps and installed editors (for the view's menus).</summary>
+    public IShellMenuService ShellMenus => _shellMenus;
+
+    private bool CanOpenInEditor() => IsLocalFolder || (IsLocalProvider && _selected.Count > 0 && !_selected.Any(s => s.IsDrive && s.Path.Length > 3));
+
+    /// <summary>Paths an editor should open: the selection, or the current folder when nothing is selected.</summary>
+    public IReadOnlyList<string> EditorTargets() =>
+        _selected.Count > 0 ? _selected.Select(s => s.Path).ToList() :
+        IsLocalFolder && Location is not null ? [Location.Path] : [];
+
+    public async Task<CodeEditor?> GetPreferredEditorAsync()
+    {
+        var editors = await _shellMenus.GetCodeEditorsAsync();
+        string id = _settings.Current.PreferredEditor;
+        return editors.FirstOrDefault(e => e.Id == id) ?? editors.FirstOrDefault();
+    }
+
+    /// <summary>Ctrl+Shift+E: opens the selection (or this folder) in VS Code / the preferred editor.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenInEditor))]
+    private async Task OpenInEditorAsync()
+    {
+        var editor = await GetPreferredEditorAsync();
+        if (editor is null)
+        {
+            ShowError("No code editor found. Install VS Code (or Cursor, Zed, Sublime Text) and try again.");
+            return;
+        }
+        OpenInEditor(editor);
+    }
+
+    public void OpenInEditor(CodeEditor editor)
+    {
+        var targets = EditorTargets();
+        if (targets.Count == 0) return;
+        try
+        {
+            // Several files: one window each would be noisy; editors accept many paths but folders are opened one by one.
+            foreach (var path in targets.Take(8)) _shellMenus.OpenInEditor(editor, path);
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Couldn't start {editor.Name}: {ex.Message}");
+        }
+    }
+
+    public async Task OpenWithAppAsync(OpenWithApp app)
+    {
+        var files = _selected.Where(s => !s.IsContainer).Select(s => s.Path).ToList();
+        if (files.Count == 0) return;
+        try
+        {
+            await _shellMenus.OpenWithAsync(app, files);
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Couldn't open with {app.Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Settings › "Hidden menu items": captions or verbs, comma separated.</summary>
+    public bool IsShellEntryHidden(ShellMenuEntry entry)
+    {
+        string list = _settings.Current.HiddenShellMenuItems;
+        if (string.IsNullOrWhiteSpace(list) || entry.IsSeparator) return false;
+        foreach (var raw in list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (raw.Equals(entry.Text, StringComparison.OrdinalIgnoreCase) || raw.Equals(entry.Verb, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Windows context menu entries (shell extensions) for the selection, or for the folder background.</summary>
+    public Task<IShellMenu?> GetShellMenuAsync(bool background, bool extended)
+    {
+        if (!_settings.Current.ShowShellMenuItems || !IsLocalProvider || IsAtRoot && background) return Task.FromResult<IShellMenu?>(null);
+        if (background)
+            return Location is { Path.Length: > 0 } location && !IsSearchMode ? _shellMenus.GetBackgroundMenuAsync(location.Path, extended) : Task.FromResult<IShellMenu?>(null);
+        var paths = _selected.Select(s => s.Path).ToList();
+        if (paths.Count == 0) return Task.FromResult<IShellMenu?>(null);
+        // One folder only: IContextMenu needs a common parent (search results can mix folders).
+        string? parent = Path.GetDirectoryName(paths[0]);
+        paths = paths.Where(p => string.Equals(Path.GetDirectoryName(p), parent, StringComparison.OrdinalIgnoreCase)).ToList();
+        return _shellMenus.GetItemMenuAsync(paths, extended);
+    }
+
+    private bool CanNewFolderFromSelection() => CanCreateFolder() && HasMovableSelection && SelectedNonDrives.Count > 0;
+
+    /// <summary>Moves the selection into a new folder (named after the item when only one is selected), then renames it.</summary>
+    [RelayCommand(CanExecute = nameof(CanNewFolderFromSelection))]
+    private async Task NewFolderFromSelectionAsync()
+    {
+        if (Provider is null || Location is null) return;
+        var items = SelectedNonDrives;
+        if (items.Count == 0) return;
+        var names = new HashSet<string>(_all.Select(v => v.Name), StringComparer.OrdinalIgnoreCase);
+        string baseName = items.Count == 1 ? Path.GetFileNameWithoutExtension(items[0].Name) : "New folder";
+        if (string.IsNullOrWhiteSpace(baseName)) baseName = "New folder";
+        string name = FileNameValidator.GetUniqueName(baseName, names);
+        try
+        {
+            var folder = await Provider.CreateFolderAsync(Location.Path, name, CancellationToken.None);
+            _operations.Enqueue(OperationKind.Move, Provider.Id, items.Select(i => i.Item).ToList(), new StorageLocation(Provider.Id, folder.Path));
+            if (!_byPath.TryGetValue(folder.Path, out var vm))
+            {
+                vm = CreateItem(folder);
+                _byPath[folder.Path] = vm;
+                _all.Add(vm);
+                SortList(_all);
+            }
+            ApplyView(replace: false);
+            _cache.Invalidate(Location);
+            SelectionRequested?.Invoke(this, [vm]);
+            BeginRename(vm);
         }
         catch (StorageException ex)
         {

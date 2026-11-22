@@ -16,6 +16,50 @@ public enum FileViewMode
     Grid,
 }
 
+/// <summary>How the Date modified column is written.</summary>
+public enum DateDisplay
+{
+    /// <summary>Windows short date and time ("22/11/2026 14:23").</summary>
+    System,
+    DayMonthYear,
+    YearMonthDay,
+    MonthDayYear,
+
+    /// <summary>"5 min ago", "3 h ago", "2 days ago", then the date (OneCommander-style age).</summary>
+    Relative,
+}
+
+public enum TerminalApp
+{
+    WindowsTerminal,
+    PowerShell7,
+    WindowsPowerShell,
+    CommandPrompt,
+}
+
+public enum CopyPathFormat
+{
+    /// <summary>C:\My Files\a.txt → "C:\My Files\a.txt" (quotes only when there are spaces).</summary>
+    QuoteWhenNeeded,
+    Plain,
+    ForwardSlashes,
+}
+
+/// <summary>Where a folder opened from outside (Win+E, Explorer, command line) appears.</summary>
+public enum ExternalOpenTarget
+{
+    NewTab,
+    CurrentTab,
+}
+
+public enum WindowBackdrop
+{
+    Mica,
+    MicaAlt,
+    Acrylic,
+    Solid,
+}
+
 public sealed class FavoriteEntry
 {
     public string Name { get; set; } = string.Empty;
@@ -69,6 +113,9 @@ public sealed class AppSettings
     /// <summary>Calculate folder sizes automatically when a local folder opens (OneCommander style).</summary>
     public bool AutoFolderSizes { get; set; }
     public bool RestoreLastLocations { get; set; } = true;
+
+    /// <summary>Editor used by "Open in editor" (Ctrl+Shift+E): a <c>CodeEditor.Id</c>; empty = first one found (VS Code first).</summary>
+    public string PreferredEditor { get; set; } = string.Empty;
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;
     public int MaxSimultaneousOperations { get; set; } = 2;
 
@@ -88,4 +135,37 @@ public sealed class AppSettings
     public PaneState LeftPane { get; set; } = new();
     public PaneState RightPane { get; set; } = new();
     public WindowPlacement Window { get; set; } = new();
+
+    // ---- Appearance
+    public WindowBackdrop Backdrop { get; set; } = WindowBackdrop.Mica;
+
+    // ---- Files and folders
+    public DateDisplay DateDisplay { get; set; } = DateDisplay.System;
+
+    /// <summary>1 KB = 1000 bytes (drive makers, macOS) instead of 1024 (Windows).</summary>
+    public bool DecimalSizeUnits { get; set; }
+
+    /// <summary>".git", ".godot", ".vscode"… count as hidden items (Linux/macOS convention).</summary>
+    public bool TreatDotFilesAsHidden { get; set; }
+
+    /// <summary>Hide Office lock files (~$*), *.tmp, Thumbs.db and desktop.ini even when hidden items are shown.</summary>
+    public bool HideJunkFiles { get; set; }
+
+    /// <summary>Ask before moving items to the Recycle Bin (permanent delete always asks).</summary>
+    public bool ConfirmRecycle { get; set; }
+
+    // ---- Apps and menus
+    public TerminalApp Terminal { get; set; } = TerminalApp.WindowsTerminal;
+    public CopyPathFormat CopyPathFormat { get; set; } = CopyPathFormat.QuoteWhenNeeded;
+
+    /// <summary>Show Windows shell extension items (7-Zip, Git, VLC, Send to…) in the right-click menu.</summary>
+    public bool ShowShellMenuItems { get; set; } = true;
+
+    /// <summary>Comma-separated captions or verbs of shell items to leave out ("Share, Give access to").</summary>
+    public string HiddenShellMenuItems { get; set; } = string.Empty;
+
+    // ---- Windows integration (registry state is the source of truth for the rest)
+    /// <summary>Closing the window keeps AkioExplorer in the notification area, so it reopens instantly.</summary>
+    public bool KeepRunningInBackground { get; set; }
+    public ExternalOpenTarget ExternalOpenTarget { get; set; } = ExternalOpenTarget.NewTab;
 }

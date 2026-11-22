@@ -40,6 +40,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private readonly IconService _icons;
     private readonly IShellIconExtractor _shell;
     private readonly IShellActions _shellActions;
+    private readonly IShellMenuService _shellMenus;
     private readonly ISettingsService _settings;
     private readonly FavoritesService _favorites;
     private readonly DialogService _dialogs;
@@ -74,6 +75,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         IconService icons,
         IShellIconExtractor shell,
         IShellActions shellActions,
+        IShellMenuService shellMenus,
         ISettingsService settings,
         FavoritesService favorites,
         DialogService dialogs,
@@ -88,6 +90,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _icons = icons;
         _shell = shell;
         _shellActions = shellActions;
+        _shellMenus = shellMenus;
         _settings = settings;
         _favorites = favorites;
         _dialogs = dialogs;
@@ -110,6 +113,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
         _viewMode = settings.Current.DefaultViewMode;
         FileItemViewModel.ShowExtensions = settings.Current.ShowFileExtensions;
+        Formatting.DecimalUnits = settings.Current.DecimalSizeUnits;
+        Formatting.DateDisplay = settings.Current.DateDisplay;
         InitializeTabs();
         settings.Changed += (_, _) => OnSettingsChanged();
     }
@@ -610,12 +615,29 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         list.Sort((a, b) => comparer.Compare(a.Item, b.Item));
     }
 
+    private bool IsShownBySettings(FileItemViewModel vm)
+    {
+        var settings = _settings.Current;
+        if (!settings.ShowHiddenItems && (vm.Item.IsHidden || settings.TreatDotFilesAsHidden && vm.Name.StartsWith('.'))) return false;
+        return !(settings.HideJunkFiles && IsJunkFile(vm));
+    }
+
     private bool IsVisible(FileItemViewModel vm)
     {
-        if (vm.Item.IsHidden && !_settings.Current.ShowHiddenItems) return false;
+        var settings = _settings.Current;
+        if (!settings.ShowHiddenItems && (vm.Item.IsHidden || settings.TreatDotFilesAsHidden && vm.Name.StartsWith('.'))) return false;
+        if (settings.HideJunkFiles && IsJunkFile(vm)) return false;
         if (_viewMatcher is not null && !_viewMatcher.Matches(vm.Item)) return false;
         return FilterText.Length == 0 || vm.Name.Contains(FilterText, StringComparison.CurrentCultureIgnoreCase);
     }
+
+    /// <summary>Office lock files, temp files and Windows folder metadata (Settings › Hide temporary files).</summary>
+    private static bool IsJunkFile(FileItemViewModel vm) =>
+        vm.Item.Kind == StorageItemKind.File &&
+        (vm.Name.StartsWith("~$", StringComparison.Ordinal)
+         || vm.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+         || vm.Name.Equals("Thumbs.db", StringComparison.OrdinalIgnoreCase)
+         || vm.Name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase));
 
     private void ApplyView(bool replace)
     {
@@ -739,7 +761,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
         else
         {
-            int total = _settings.Current.ShowHiddenItems ? _all.Count : _all.Count(v => !v.Item.IsHidden);
+            int total = _all.Count(IsShownBySettings);
             bool narrowed = FilterText.Length > 0 || _viewMatcher is not null;
             StatusText = narrowed
                 ? $"{Items.Count:N0} of {total:N0} items"
@@ -982,6 +1004,16 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     {
         if (Provider is null || !CanDelete()) return;
         var targets = _selected.ToList();
+
+        if (!permanent && _settings.Current.ConfirmRecycle)
+        {
+            string title = targets.Count == 1 ? $"Move \"{targets[0].Name}\" to the Recycle Bin?" : $"Move {targets.Count:N0} items to the Recycle Bin?";
+            if (!await _dialogs.ConfirmAsync(title, "You can restore them from the Recycle Bin or with Ctrl+Z.", "Delete"))
+            {
+                FocusListRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+        }
 
         if (permanent)
         {
@@ -1306,7 +1338,13 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         var paths = TargetPaths();
         if (paths.Count == 0) return;
         var package = new DataPackage();
-        package.SetText(string.Join(Environment.NewLine, paths.Select(p => p.Contains(' ') ? $"\"{p}\"" : p)));
+        var format = _settings.Current.CopyPathFormat;
+        package.SetText(string.Join(Environment.NewLine, paths.Select(p => format switch
+        {
+            CopyPathFormat.Plain => p,
+            CopyPathFormat.ForwardSlashes => p.Replace('\\', '/'),
+            _ => p.Contains(' ') ? $"\"{p}\"" : p,
+        })));
         Clipboard.SetContent(package);
     }
 

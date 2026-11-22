@@ -14,6 +14,7 @@ public sealed partial class SettingsView : UserControl
         Cloud = App.Services.GetRequiredService<CloudAccountsViewModel>();
         InitializeComponent();
         Loaded += async (_, _) => await Cloud.LoadQuotasAsync();
+        Categories.SelectedIndex = 0;
         ViewModel.Favorites.CollectionChanged += (_, _) => Bindings.Update();
 
     }
@@ -51,7 +52,57 @@ public sealed partial class SettingsView : UserControl
     public void SetAvailableWidth(double width)
     {
         if (width <= 0) return;
-        Body.Width = Math.Min(1000, width);
+        Layout.Width = width;
+        Body.Width = Math.Max(320, Math.Min(900, width - 236));
+    }
+
+    // ------------------------------------------------------------------ categories and search
+
+    private IEnumerable<StackPanel> Sections => Body.Children.OfType<StackPanel>().Where(p => p.Tag is string);
+
+    private void OnCategoryChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SearchBox.Text.Length > 0) SearchBox.Text = string.Empty; // picking a category ends the search
+        else ShowCategory();
+    }
+
+    private void ShowCategory()
+    {
+        string? tag = (Categories.SelectedItem as FrameworkElement)?.Tag as string ?? "General";
+        foreach (var section in Sections)
+        {
+            section.Visibility = (string)section.Tag == tag ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var row in section.Children.OfType<Controls.SettingRow>()) row.Visibility = Visibility.Visible;
+        }
+        NoMatches.Visibility = Visibility.Collapsed;
+        Scroller.ChangeView(null, 0, null, disableAnimation: true);
+    }
+
+    /// <summary>Recognition over recall: type any word and every matching setting shows, across categories.</summary>
+    private void OnSearchChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        string query = sender.Text.Trim();
+        if (query.Length == 0)
+        {
+            ShowCategory();
+            return;
+        }
+
+        bool any = false;
+        foreach (var section in Sections)
+        {
+            bool sectionHit = false;
+            foreach (var row in section.Children.OfType<Controls.SettingRow>())
+            {
+                bool hit = row.Header.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                           || row.Description.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+                row.Visibility = hit ? Visibility.Visible : Visibility.Collapsed;
+                sectionHit |= hit;
+            }
+            section.Visibility = sectionHit ? Visibility.Visible : Visibility.Collapsed;
+            any |= sectionHit;
+        }
+        NoMatches.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public bool HasFavorites => ViewModel.Favorites.Count > 0;

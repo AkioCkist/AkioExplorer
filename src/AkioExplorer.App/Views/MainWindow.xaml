@@ -58,6 +58,7 @@
             <KeyboardAccelerator Modifiers="Control,Menu" Key="N" Invoked="OnNewFileAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Menu" Key="S" Invoked="OnFolderSizesAccelerator" />
             <KeyboardAccelerator Modifiers="Control,Menu" Key="T" Invoked="OnTerminalAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="E" Invoked="OnEditorAccelerator" />
             <KeyboardAccelerator Modifiers="Control" Key="H" Invoked="OnHiddenItemsAccelerator" />
         </Grid.KeyboardAccelerators>
 

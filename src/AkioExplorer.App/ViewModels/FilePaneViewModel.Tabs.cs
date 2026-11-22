@@ -3,6 +3,7 @@ using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using AkioExplorer.Infrastructure.Local;
 
 namespace AkioExplorer.App.ViewModels;
 
@@ -81,6 +82,52 @@ public sealed partial class FilePaneViewModel
         };
         Tabs.Insert(ActiveTabIndex + 1, tab);
         if (activate) _ = SwitchToTabAsync(tab);
+    }
+
+    /// <summary>
+    /// A folder (or file) handed over by Windows: Win+E, a double-clicked folder, "AkioExplorer ." in a terminal.
+    /// New-tab mode reuses a tab already showing that folder (OneCommander's "existing tab with the same path").
+    /// </summary>
+    public async Task OpenExternalAsync(string path, bool newTab)
+    {
+        string? focus = null;
+        string folder = path;
+        if (File.Exists(path))
+        {
+            focus = path;
+            folder = System.IO.Path.GetDirectoryName(path) ?? path;
+        }
+        var location = new StorageLocation(LocalStorageProvider.ProviderId, folder);
+
+        if (!newTab)
+        {
+            await NavigateAsync(location, NavigationKind.New, focusPath: focus);
+            return;
+        }
+
+        static string Norm(string p) => p.Length > 3 ? p.TrimEnd('\\', '/') : p;
+        var existing = Tabs.FirstOrDefault(t => t.Location is { ProviderId: LocalStorageProvider.ProviderId } l
+                                                && string.Equals(Norm(l.Path), Norm(folder), StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            if (existing == ActiveTab)
+            {
+                if (focus is not null) await NavigateAsync(location, NavigationKind.Restore, focusPath: focus);
+                return;
+            }
+            existing.FocusPath = focus ?? existing.FocusPath;
+            await SwitchToTabAsync(existing);
+            return;
+        }
+
+        var tab = new PaneTab
+        {
+            Location = location,
+            Title = _registry.Find(location.ProviderId)?.GetDisplayName(location.Path) ?? location.Path,
+            FocusPath = focus,
+        };
+        Tabs.Insert(ActiveTabIndex + 1, tab);
+        await SwitchToTabAsync(tab);
     }
 
     /// <summary>Opens the selected folder (or the current one) in a new tab.</summary>
