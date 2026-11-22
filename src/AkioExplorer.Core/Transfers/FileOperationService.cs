@@ -222,8 +222,12 @@ public sealed class FileOperationService : IFileOperationService
         op.SetStatus(op.Errors.Count > 0 ? OperationStatus.CompletedWithErrors : OperationStatus.Completed);
     }
 
-    private static string TransferName(IStorageProvider src, StorageItem file) =>
-        src is IFileContentProvider content && !file.IsContainer ? content.GetTransferName(file) : file.Name;
+    private static string TransferName(IStorageProvider src, IStorageProvider dst, StorageItem file) =>
+        DestinationName(dst, src is IFileContentProvider content && !file.IsContainer ? content.GetTransferName(file) : file.Name);
+
+    /// <summary>A name the destination accepts ("A | B" from Google Drive becomes "A _ B" on disk/OneDrive/Dropbox).</summary>
+    private static string DestinationName(IStorageProvider dst, string name) =>
+        dst is IFileContentProvider content ? content.MakeValidName(name) : name;
 
     private static async Task ExpandAsync(IStorageProvider src, string folderPath, string relative, TopLevel top, CancellationToken ct)
     {
@@ -251,16 +255,17 @@ public sealed class FileOperationService : IFileOperationService
     {
         await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         var item = top.Item;
-        string topTarget = dst.CombinePath(destRoot, item.Name);
+        string topName = DestinationName(dst, item.Name);
+        string topTarget = dst.CombinePath(destRoot, topName);
         bool anyWritten = false;
 
         if (item.IsContainer)
         {
             var existing = await dst.GetItemAsync(topTarget, ct).ConfigureAwait(false);
             if (top.SameFolder)
-                topTarget = await UniqueNameAsync(dst, destRoot, item.Name, copySuffix: true, ct).ConfigureAwait(false);
+                topTarget = await UniqueNameAsync(dst, destRoot, topName, copySuffix: true, ct).ConfigureAwait(false);
             else if (existing is { IsContainer: false })
-                topTarget = await UniqueNameAsync(dst, destRoot, item.Name, copySuffix: false, ct).ConfigureAwait(false);
+                topTarget = await UniqueNameAsync(dst, destRoot, topName, copySuffix: false, ct).ConfigureAwait(false);
             // An existing folder with the same name is merged; conflicts are handled per file inside it.
 
             var folderPaths = new Dictionary<string, string>(StringComparer.Ordinal) { [string.Empty] = topTarget };
@@ -356,7 +361,7 @@ public sealed class FileOperationService : IFileOperationService
     {
         await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         long size = file.Size ?? 0;
-        string name = TransferName(src, file);
+        string name = TransferName(src, dst, file);
         string target = inPlaceCopy
             ? await UniqueNameAsync(dst, folder, name, copySuffix: true, ct).ConfigureAwait(false)
             : dst.CombinePath(folder, name);
@@ -485,7 +490,7 @@ public sealed class FileOperationService : IFileOperationService
         int cut = relative.LastIndexOf('\u0000');
         string parentRelative = cut < 0 ? string.Empty : relative[..cut];
         string name = cut < 0 ? relative : relative[(cut + 1)..];
-        path = dst.CombinePath(ResolveFolder(dst, cache, parentRelative), name);
+        path = dst.CombinePath(ResolveFolder(dst, cache, parentRelative), DestinationName(dst, name));
         cache[relative] = path;
         return path;
     }

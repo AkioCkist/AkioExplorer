@@ -28,7 +28,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public const string Root = "root";
     private const string FolderMime = "application/vnd.google-apps.folder";
     private const string ShortcutMime = "application/vnd.google-apps.shortcut";
-    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink";
+    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canDownload)";
 
     private const string ApiBase = "https://www.googleapis.com/drive/v3";
 
@@ -38,6 +38,9 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     private readonly ConcurrentDictionary<string, (string Name, string? Parent)> _nodes = new();
     private readonly ConcurrentDictionary<string, string> _mimeById = new();
     private readonly ConcurrentDictionary<string, string> _thumbnailById = new();
+
+    /// <summary>Files whose owner turned off downloading for viewers/commenters (Drive "capabilities.canDownload").</summary>
+    private readonly ConcurrentDictionary<string, byte> _noDownload = new();
     private readonly ConcurrentDictionary<string, string> _resolvedFolders = new();
     private string? _rootId;
 
@@ -312,6 +315,12 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     private bool IsNative(StorageItem file, out string mime) =>
         _mimeById.TryGetValue(file.Path, out mime!) && mime.StartsWith("application/vnd.google-apps.", StringComparison.Ordinal);
 
+    private static StorageException DownloadDisabled(StorageItem file) => new(StorageErrorKind.AccessDenied,
+        $"The owner of \"{file.Name}\" turned off downloading and copying for people who can only view it. Ask the owner to allow downloads or give you edit access.");
+
+    /// <summary>Drive only forbids "/" in names.</summary>
+    public string MakeValidName(string name) => string.IsNullOrWhiteSpace(name) ? "_" : name.Replace('/', '_');
+
     public string GetTransferName(StorageItem file) =>
         IsNative(file, out var mime) && ExportFormat(mime) is { } format && !file.Name.EndsWith(format.Extension, StringComparison.OrdinalIgnoreCase)
             ? file.Name + format.Extension
@@ -348,7 +357,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     /// </summary>
     public async Task<DirectDownload?> GetDirectDownloadAsync(StorageItem file, bool refresh, CancellationToken cancellationToken)
     {
-        if (IsNative(file, out _)) return null;
+        if (IsNative(file, out _) || _noDownload.ContainsKey(file.Path)) return null; // streaming path reports why
         string token = await _tokens.GetAccessTokenAsync(cancellationToken, forceRefresh: refresh).ConfigureAwait(false);
         return new DirectDownload(
             $"{ApiBase}/files/{Uri.EscapeDataString(file.Path)}?alt=media&supportsAllDrives=true",
@@ -357,6 +366,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
 
     public async Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken)
     {
+        if (_noDownload.ContainsKey(file.Path)) throw DownloadDisabled(file);
         string url;
         if (IsNative(file, out var mime))
         {
@@ -398,6 +408,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
                 HttpStatusCode.NotFound => new StorageException(StorageErrorKind.NotFound, $"\"{file.Name}\" no longer exists in {DisplayName}."),
                 HttpStatusCode.Forbidden when body.Contains("exportSizeLimitExceeded") =>
                     new StorageException(StorageErrorKind.NotSupported, $"\"{file.Name}\" is too large for Google to export."),
+                HttpStatusCode.Forbidden when body.Contains("cannotDownloadFile") || body.Contains("cannotExportFile") => DownloadDisabled(file),
                 HttpStatusCode.Forbidden when body.Contains("cannotDownloadAbusiveFile") =>
                     new StorageException(StorageErrorKind.AccessDenied, $"Google blocked downloading \"{file.Name}\" (flagged as harmful)."),
                 HttpStatusCode.Forbidden => new StorageException(StorageErrorKind.AccessDenied, $"You don't have permission to download \"{file.Name}\"."),
@@ -605,6 +616,11 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         if (parentId is not null && parentId == _rootId) parentId = Root;
         _nodes[id] = (file.Name, parentId);
         _mimeById[id] = mime;
+        if (!shortcut) // a shortcut's capabilities describe the shortcut, not its target
+        {
+            if (!folder && file.Capabilities?.CanDownload == false) _noDownload[id] = 0;
+            else _noDownload.TryRemove(id, out _);
+        }
         if (!folder && !string.IsNullOrEmpty(file.ThumbnailLink)) _thumbnailById[id] = file.ThumbnailLink;
         else _thumbnailById.TryRemove(id, out _);
 

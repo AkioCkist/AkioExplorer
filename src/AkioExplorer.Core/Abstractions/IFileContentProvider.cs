@@ -12,6 +12,12 @@ public interface IFileContentProvider
     /// <summary>Name a file gets when copied elsewhere (e.g. a Google Doc becomes "Plan.docx").</summary>
     string GetTransferName(StorageItem file) => file.Name;
 
+    /// <summary>
+    /// Name this provider can store for an item arriving from elsewhere. Default: Windows rules (local disk, OneDrive
+    /// and Dropbox share them), so "Plan | v2" becomes "Plan _ v2" instead of failing the copy.
+    /// </summary>
+    string MakeValidName(string name) => Logic.FileNameValidator.MakeValid(name);
+
     /// <summary>Opens a forward-only stream of the file contents. Dispose it to release the connection.</summary>
     Task<Stream> OpenReadAsync(StorageItem file, CancellationToken cancellationToken);
 

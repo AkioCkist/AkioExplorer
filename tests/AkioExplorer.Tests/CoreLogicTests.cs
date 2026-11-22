@@ -82,6 +82,20 @@ public class FileNameValidatorTests
         Assert.Equal(valid, FileNameValidator.Validate(name) is null);
     }
 
+    [Theory]
+    [InlineData("ok.txt", "ok.txt")]
+    [InlineData("Copy of GC1 |  The New World —AMERIGO VESPUCCI.docx", "Copy of GC1 _  The New World —AMERIGO VESPUCCI.docx")]
+    [InlineData("a/b:c?.pdf", "a_b_c_.pdf")]
+    [InlineData("trailing. ", "trailing")]
+    [InlineData("con.txt", "con_.txt")]
+    [InlineData("  ", "_")]
+    public void MakeValid_fixes_names_from_other_services(string input, string expected)
+    {
+        string result = FileNameValidator.MakeValid(input);
+        Assert.Equal(expected, result);
+        Assert.Null(FileNameValidator.Validate(result));
+    }
+
     [Fact]
     public void Unique_name_appends_counter()
     {

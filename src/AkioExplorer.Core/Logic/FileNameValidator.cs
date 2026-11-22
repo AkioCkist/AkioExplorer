@@ -42,6 +42,40 @@ public static class FileNameValidator
         return null;
     }
 
+    /// <summary>
+    /// Turns a name from another service (Google Drive allows "|", "?", ":" …) into one Windows, OneDrive and Dropbox
+    /// accept, so a copy keeps going instead of failing: forbidden characters become "_", control characters are
+    /// dropped, trailing spaces/periods are trimmed, reserved device names get a "_" and long names are shortened
+    /// with the extension kept. Already valid names come back unchanged.
+    /// </summary>
+    public static string MakeValid(string name)
+    {
+        if (Validate(name) is null) return name;
+
+        var builder = new System.Text.StringBuilder(name.Length);
+        foreach (char c in name)
+        {
+            if (c < 32) continue;
+            builder.Append(Array.IndexOf(InvalidChars, c) >= 0 ? '_' : c);
+        }
+
+        string result = builder.ToString().Trim().TrimEnd('.', ' ');
+        if (result.Length == 0 || result is "." or "..") result = "_";
+
+        if (result.Length > 255)
+        {
+            string ext = Path.GetExtension(result);
+            if (ext.Length > 16) ext = string.Empty;
+            result = result[..(255 - ext.Length)].TrimEnd('.', ' ') + ext;
+        }
+
+        int dot = result.IndexOf('.');
+        string stem = (dot < 0 ? result : result[..dot]).TrimEnd();
+        if (ReservedNames.Contains(stem)) result = stem + "_" + result[stem.Length..];
+
+        return result;
+    }
+
     /// <summary>"New folder", "New folder (2)", ... – first name not contained in <paramref name="existing"/>.</summary>
     public static string GetUniqueName(string baseName, ICollection<string> existing)
     {
