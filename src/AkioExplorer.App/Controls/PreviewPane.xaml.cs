@@ -239,28 +239,133 @@ public sealed partial class PreviewPane : UserControl
         if (document.PageCount > maxPages) ShowNote($"First {maxPages} of {document.PageCount} pages");
     }
 
+    /// <summary>
+    /// Music: the cover on top (whole, never under the controls) and the transport bar below it.
+    /// Video: the player sized to the video's own shape inside the pane, so there are no black bars and the controls
+    /// sit on the picture, whatever the pane's width or height.
+    /// </summary>
     private async Task ShowMediaAsync(string path, CancellationToken ct)
     {
-        if (_media is null)
-        {
-            _media = new MediaPlayerElement
-            {
-                AreTransportControlsEnabled = true,
-                AutoPlay = false,
-                Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
-            };
-            _media.TransportControls.IsCompact = true;
-            _media.TransportControls.IsZoomButtonVisible = false;
-            MediaHost.Children.Add(_media);
-        }
+        EnsureMediaElements();
+        bool audio = FileCategories.Of(Path.GetFileName(path), isFolder: false) == FileCategory.Audio;
+        _audio = audio;
+        _videoAspect = 16.0 / 9;
 
-        // Album art / video frame as the poster, like the shell shows it.
         var file = await StorageFile.GetFileFromPathAsync(path);
         ct.ThrowIfCancellationRequested();
-        _media.PosterSource = await ThumbnailAsync(file, ThumbnailMode.SingleItem, ct);
+        var picture = await ThumbnailAsync(file, ThumbnailMode.SingleItem, ct);
         ct.ThrowIfCancellationRequested();
+
+        if (audio)
+        {
+            // A cover only when the file has one; otherwise a note glyph instead of the shell's generic icon.
+            bool hasCover = picture is not null && await HasPictureAsync(file);
+            _art!.Source = hasCover ? picture : null;
+            _art.Visibility = hasCover ? Visibility.Visible : Visibility.Collapsed;
+            _artGlyph!.Visibility = hasCover ? Visibility.Collapsed : Visibility.Visible;
+            _media!.PosterSource = null;
+        }
+        else
+        {
+            _art!.Visibility = Visibility.Collapsed;
+            _artGlyph!.Visibility = Visibility.Collapsed;
+            _media!.PosterSource = picture;
+            if (picture is { PixelWidth: > 0, PixelHeight: > 0 }) _videoAspect = (double)picture.PixelWidth / picture.PixelHeight;
+        }
         _media.Source = MediaSource.CreateFromStorageFile(file);
         MediaHost.Visibility = Visibility.Visible;
+        LayoutMedia();
+    }
+
+    private bool _audio;
+    private double _videoAspect = 16.0 / 9;
+    private Image? _art;
+    private FontIcon? _artGlyph;
+
+    /// <summary>Bar height of the compact transport controls (play, seek, time, volume).</summary>
+    private const double ControlsHeight = 52;
+
+    private void EnsureMediaElements()
+    {
+        if (_media is not null) return;
+        MediaHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        MediaHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        _art = new Image { Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform, Margin = new Thickness(8, 8, 8, 0) };
+        _artGlyph = new FontIcon { Glyph = "", FontSize = 56, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"] };
+        MediaHost.Children.Add(_art);
+        MediaHost.Children.Add(_artGlyph);
+
+        _media = new MediaPlayerElement
+        {
+            AreTransportControlsEnabled = true,
+            AutoPlay = false,
+            Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _media.TransportControls.IsCompact = true;
+        _media.TransportControls.IsZoomButtonVisible = false;
+        MediaHost.Children.Add(_media);
+        MediaHost.SizeChanged += (_, _) => LayoutMedia();
+        _media.MediaPlayer.MediaOpened += (player, _) =>
+        {
+            // The real frame size (the thumbnail can be letterboxed by the shell).
+            uint w = player.PlaybackSession.NaturalVideoWidth, h = player.PlaybackSession.NaturalVideoHeight;
+            if (w > 0 && h > 0)
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    _videoAspect = (double)w / h;
+                    LayoutMedia();
+                });
+        };
+    }
+
+    private void LayoutMedia()
+    {
+        if (_media is null) return;
+        double width = MediaHost.ActualWidth, height = MediaHost.ActualHeight;
+        if (width <= 0 || height <= 0) return;
+
+        if (_audio)
+        {
+            Grid.SetRow(_media, 1);
+            Grid.SetRowSpan(_media, 1);
+            _media.Width = double.NaN;
+            _media.Height = ControlsHeight;
+            _media.HorizontalAlignment = HorizontalAlignment.Stretch;
+            _media.VerticalAlignment = VerticalAlignment.Bottom;
+            return;
+        }
+
+        // Video: the largest box of the video's shape that fits; never narrower than the controls need.
+        Grid.SetRow(_media, 0);
+        Grid.SetRowSpan(_media, 2);
+        double w = Math.Min(width, height * _videoAspect);
+        double h = w / _videoAspect;
+        if (w < Math.Min(width, 260))
+        {
+            w = Math.Min(width, 260); // very tall video in a narrow pane: keep the controls usable
+            h = Math.Min(height, w / _videoAspect);
+        }
+        _media.Width = w;
+        _media.Height = Math.Max(h, Math.Min(height, ControlsHeight * 2));
+        _media.HorizontalAlignment = HorizontalAlignment.Center;
+        _media.VerticalAlignment = VerticalAlignment.Center;
+    }
+
+    /// <summary>True when the shell's picture for a music file is real cover art (not the type icon).</summary>
+    private static async Task<bool> HasPictureAsync(StorageFile file)
+    {
+        try
+        {
+            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 64, ThumbnailOptions.ResizeThumbnail);
+            return thumbnail is { Type: ThumbnailType.Image };
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private async Task ShowCloudRenditionAsync(IThumbnailProvider provider, StorageItem item, CancellationToken ct)

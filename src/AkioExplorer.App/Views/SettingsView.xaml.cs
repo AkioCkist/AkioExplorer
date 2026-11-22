@@ -53,7 +53,37 @@ public sealed partial class SettingsView : UserControl
     {
         if (width <= 0) return;
         Layout.Width = width;
-        Body.Width = Math.Max(320, Math.Min(900, width - 236));
+        bool narrow = width < NarrowWidth;
+        if (narrow != _narrow) ApplyLayout(narrow);
+        Body.Width = narrow ? Math.Max(260, width - 24) : Math.Max(320, Math.Min(900, width - 236));
+    }
+
+    /// <summary>Below this width the categories move above the settings (a scrolling row) instead of a side column.</summary>
+    private const double NarrowWidth = 720;
+
+    private bool? _narrow;
+
+    private void ApplyLayout(bool narrow)
+    {
+        _narrow = narrow;
+        SidebarColumn.Width = narrow ? new GridLength(0) : new GridLength(220);
+        Grid.SetRowSpan(Sidebar, narrow ? 1 : 2);
+        Grid.SetColumnSpan(Sidebar, narrow ? 2 : 1);
+        Sidebar.Padding = narrow ? new Thickness(16, 16, 16, 0) : new Thickness(16, 24, 0, 16);
+        Grid.SetRow(Scroller, narrow ? 1 : 0);
+        Grid.SetRowSpan(Scroller, narrow ? 1 : 2);
+        Grid.SetColumn(Scroller, narrow ? 0 : 1);
+        Grid.SetColumnSpan(Scroller, narrow ? 2 : 1);
+        Body.Padding = narrow ? new Thickness(16, 8, 16, 32) : new Thickness(16, 24, 32, 32);
+
+        // Categories: a vertical list beside the settings, or a horizontal strip above them.
+        Categories.ItemsPanel = (ItemsPanelTemplate)Microsoft.UI.Xaml.Markup.XamlReader.Load(narrow
+            ? "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><ItemsStackPanel Orientation='Horizontal' /></ItemsPanelTemplate>"
+            : "<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><ItemsStackPanel Orientation='Vertical' /></ItemsPanelTemplate>");
+        ScrollViewer.SetHorizontalScrollMode(Categories, narrow ? ScrollMode.Enabled : ScrollMode.Disabled);
+        ScrollViewer.SetHorizontalScrollBarVisibility(Categories, narrow ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled);
+        ScrollViewer.SetVerticalScrollMode(Categories, narrow ? ScrollMode.Disabled : ScrollMode.Enabled);
+        ScrollViewer.SetVerticalScrollBarVisibility(Categories, narrow ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto);
     }
 
     // ------------------------------------------------------------------ categories and search

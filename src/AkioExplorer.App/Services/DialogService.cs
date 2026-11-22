@@ -19,11 +19,61 @@ public sealed class DialogService
             dialog.XamlRoot = XamlRoot;
             dialog.Style ??= (Style)Application.Current.Resources["DefaultContentDialogStyle"];
             dialog.RequestedTheme = (XamlRoot.Content as FrameworkElement)?.ActualTheme ?? ElementTheme.Default;
-            return await dialog.ShowAsync();
+
+            // Dialogs are laid out for a roomy window; in a small one they shrink instead of being cut off.
+            var sized = new List<(FrameworkElement Element, double Width, double MinWidth, double Height)>();
+            Collect(dialog.Content, sized, depth: 0);
+            var root = XamlRoot;
+            void Fit()
+            {
+                double maxWidth = Math.Max(260, root.Size.Width - 120);
+                double maxHeight = Math.Max(140, root.Size.Height - 340);
+                foreach (var (element, width, minWidth, height) in sized)
+                {
+                    if (!double.IsNaN(width)) element.Width = Math.Min(width, maxWidth);
+                    if (minWidth > 0) element.MinWidth = Math.Min(minWidth, maxWidth);
+                    if (!double.IsNaN(height)) element.Height = Math.Min(height, maxHeight);
+                }
+            }
+            void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => Fit();
+            Fit();
+            root.Changed += OnRootChanged;
+            try
+            {
+                return await dialog.ShowAsync();
+            }
+            finally
+            {
+                root.Changed -= OnRootChanged;
+            }
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>Elements with a set width, minimum width or tall height (lists), down a few levels of the content.</summary>
+    private static void Collect(object? content, List<(FrameworkElement, double, double, double)> sized, int depth)
+    {
+        if (content is not FrameworkElement element || depth > 6) return;
+        bool tall = !double.IsNaN(element.Height) && element.Height >= 200;
+        if (!double.IsNaN(element.Width) || element.MinWidth > 0 || tall)
+            sized.Add((element, element.Width, element.MinWidth, tall ? element.Height : double.NaN));
+        switch (element)
+        {
+            case Panel panel:
+                foreach (var child in panel.Children) Collect(child, sized, depth + 1);
+                break;
+            case ScrollViewer scroller:
+                Collect(scroller.Content, sized, depth + 1);
+                break;
+            case Border border:
+                Collect(border.Child, sized, depth + 1);
+                break;
+            case ContentControl control when control is not Button:
+                Collect(control.Content, sized, depth + 1);
+                break;
         }
     }
 

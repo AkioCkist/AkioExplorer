@@ -17,6 +17,24 @@ public sealed partial class SettingRow : UserControl
     {
         InitializeComponent();
         Refresh();
+        SizeChanged += (_, e) => Arrange(e.NewSize.Width < StackedWidth);
+    }
+
+    /// <summary>Narrower rows put the control under the text, so the text keeps a readable width.</summary>
+    private const double StackedWidth = 480;
+
+    private bool _stacked;
+
+    private void Arrange(bool stacked)
+    {
+        if (stacked == _stacked) return;
+        _stacked = stacked;
+        Grid.SetRow(ActionPresenter, stacked ? 1 : 0);
+        Grid.SetColumn(ActionPresenter, stacked ? 1 : 2);
+        ActionPresenter.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        ActionPresenter.Margin = stacked ? new Thickness(0, 8, 0, 0) : new Thickness(0);
+        Grid.SetRowSpan(Icon, stacked ? 2 : 1);
+        Icon.VerticalAlignment = stacked ? VerticalAlignment.Top : VerticalAlignment.Center;
     }
 
     public string Header { get => (string)GetValue(HeaderProperty); set => SetValue(HeaderProperty, value); }

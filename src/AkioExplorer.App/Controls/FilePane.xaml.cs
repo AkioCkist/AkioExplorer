@@ -48,8 +48,18 @@ public sealed partial class FilePane : UserControl
         Root.GotFocus += (_, _) => ViewModel?.RequestActivation();
         SizeChanged += (_, e) =>
         {
-            FilterColumn.Width = new GridLength(e.NewSize.Width < 700 ? 150 : 240);
+            _compactSearch = e.NewSize.Width < CompactSearchWidth;
+            ApplySearchLayout();
+            UpdateStatusBar();
             ViewModel?.Columns.Update(e.NewSize.Width);
+        };
+        SearchChipsHost.PointerWheelChanged += (_, e) =>
+        {
+            // The chip row scrolls sideways; a normal mouse wheel only turns up/down.
+            int delta = e.GetCurrentPoint(SearchChipsHost).Properties.MouseWheelDelta;
+            if (SearchChipsHost.ScrollableWidth <= 0 || delta == 0) return;
+            SearchChipsHost.ChangeView(SearchChipsHost.HorizontalOffset - delta, null, null);
+            e.Handled = true;
         };
     }
 
@@ -100,6 +110,8 @@ public sealed partial class FilePane : UserControl
         if (e.PropertyName is nameof(FilePaneViewModel.SearchFilters) or nameof(FilePaneViewModel.IsSearchMode)
             or nameof(FilePaneViewModel.FilterText) or nameof(FilePaneViewModel.CanSearch) or nameof(FilePaneViewModel.SearchFolderName))
             UpdateSearchChips();
+        if (e.PropertyName is nameof(FilePaneViewModel.IsSearchMode) or nameof(FilePaneViewModel.FilterText) && _compactSearch) ApplySearchLayout();
+        if (e.PropertyName == nameof(FilePaneViewModel.SelectionText)) UpdateStatusBar();
 
         if (e.PropertyName == nameof(FilePaneViewModel.ViewMode))
         {
@@ -1170,7 +1182,62 @@ public sealed partial class FilePane : UserControl
 
     private void OnFilterFocusRequested(object? sender, EventArgs e)
     {
+        ExpandSearch();
         FocusTextOf(FilterBox);
+    }
+
+    // ------------------------------------------------------------------ narrow panes
+
+    /// <summary>Below this pane width the search box becomes a button, so the address bar stays readable.</summary>
+    private const double CompactSearchWidth = 480;
+
+    /// <summary>Below this width the item count makes room for the selection in the status bar.</summary>
+    private const double CompactStatusWidth = 420;
+
+    private bool _compactSearch;
+    private bool _searchExpanded;
+
+    private bool SearchInUse => ViewModel is { } vm && (vm.FilterText.Length > 0 || vm.IsSearchMode);
+
+    private void OnSearchToggleClick(object sender, RoutedEventArgs e)
+    {
+        ExpandSearch();
+        FocusTextOf(FilterBox);
+    }
+
+    private void ExpandSearch()
+    {
+        _searchExpanded = true;
+        ApplySearchLayout();
+    }
+
+    /// <summary>Wide pane: address + search box. Narrow: address + search button; while searching, the box takes the address's place.</summary>
+    private void ApplySearchLayout()
+    {
+        if (!_compactSearch)
+        {
+            _searchExpanded = false;
+            FilterColumn.Width = new GridLength(ActualWidth < 700 ? 150 : 240);
+            Grid.SetColumn(FilterBox, 2);
+            FilterBox.Visibility = Visibility.Visible;
+            AddressHost.Visibility = Visibility.Visible;
+            SearchToggle.Visibility = Visibility.Collapsed;
+            return;
+        }
+        bool open = _searchExpanded || SearchInUse;
+        FilterColumn.Width = new GridLength(0);
+        Grid.SetColumn(FilterBox, 1);
+        FilterBox.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        AddressHost.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+        SearchToggle.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Narrow pane with a selection: the selection is what matters, the item count gives way.</summary>
+    private void UpdateStatusBar()
+    {
+        if (ViewModel is null) return;
+        bool narrow = ActualWidth > 0 && ActualWidth < CompactStatusWidth;
+        StatusLabel.Visibility = narrow && ViewModel.SelectionText.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private async void OnFilterSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)

@@ -213,6 +213,11 @@ public sealed partial class FilePane
         var focused = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
         _searchFocused = _chipMenuOpen || IsWithin(focused, FilterBox) || IsWithin(focused, SearchChips);
         UpdateSearchChips();
+        if (_compactSearch && !_searchFocused && !SearchInUse && _searchExpanded)
+        {
+            _searchExpanded = false; // narrow pane: give the address bar back once search is left empty
+            ApplySearchLayout();
+        }
     }
 
     private static bool IsWithin(DependencyObject? element, DependencyObject ancestor)

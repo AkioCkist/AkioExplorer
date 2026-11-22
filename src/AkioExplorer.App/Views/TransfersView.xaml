@@ -56,8 +56,8 @@
                         <Grid ColumnSpacing="16" RowSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="240" />
+                                <ColumnDefinition Width="2*" MinWidth="80" />
+                                <ColumnDefinition Width="*" MinWidth="80" MaxWidth="240" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>

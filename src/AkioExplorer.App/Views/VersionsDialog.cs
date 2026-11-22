@@ -38,6 +38,9 @@ public static class VersionsDialog
         var progress = new ProgressBar { IsIndeterminate = true, Visibility = Visibility.Collapsed };
         var error = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = true, IsOpen = false };
         var list = new ListView { SelectionMode = ListViewSelectionMode.Single, Height = 300, Margin = new Thickness(-12, 0, -12, 0) };
+        var rowStyle = new Style(typeof(ListViewItem));
+        rowStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        list.ItemContainerStyle = rowStyle;
         AutomationProperties.SetName(list, "Versions");
         var summary = new TextBlock { Style = Style("CaptionTextBlockStyle"), TextWrapping = TextWrapping.Wrap, Opacity = 0.8 };
 

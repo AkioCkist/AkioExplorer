@@ -51,6 +51,7 @@ public static class TrashDialog
         {
             SelectionMode = ListViewSelectionMode.Extended,
             Height = 380,
+            ItemContainerStyle = StretchRows(),
             Margin = new Thickness(-12, 0, -12, 0),
         };
         AutomationProperties.SetName(list, $"Items in the {trash.TrashName}");
@@ -246,8 +247,8 @@ public static class TrashDialog
     {
         var grid = new Grid { ColumnSpacing = 12, Padding = header ? new Thickness(12, 0, 12, 0) : new Thickness(0, 6, 0, 6) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(230) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 80 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.8, GridUnitType.Star), MaxWidth = 260 });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(130) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(80) });
         icon.Opacity = header ? 0 : 0.85;
@@ -270,6 +271,14 @@ public static class TrashDialog
             Place(grid, text, i + 1);
         }
         return grid;
+    }
+
+    /// <summary>List rows as wide as the list, so star columns line up with the header.</summary>
+    private static Style StretchRows()
+    {
+        var style = new Style(typeof(ListViewItem));
+        style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        return style;
     }
 
     private static Button ToolButton(string glyph, string label, string tip, bool labelVisible = true)

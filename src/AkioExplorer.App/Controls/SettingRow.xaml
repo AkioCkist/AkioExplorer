@@ -6,12 +6,16 @@
     HorizontalAlignment="Stretch">
     <Border MinHeight="64" Padding="16,10,16,10" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="1"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
-        <Grid ColumnSpacing="16">
+        <Grid x:Name="RowGrid" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <FontIcon x:Name="Icon" FontSize="20" VerticalAlignment="Center" />
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                 <TextBlock x:Name="HeaderText" TextWrapping="Wrap" />

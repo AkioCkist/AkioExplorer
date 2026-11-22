@@ -235,6 +235,11 @@
                         ToolTipService.ToolTip="Refresh (F5)" AutomationProperties.Name="Refresh">
                     <FontIcon Glyph="&#xE72C;" FontSize="14" />
                 </Button>
+                <!-- Narrow pane: the search box folds into this button (the address keeps the room) -->
+                <Button x:Name="SearchToggle" Style="{StaticResource ToolIconButtonStyle}" Visibility="Collapsed" Click="OnSearchToggleClick"
+                        ToolTipService.ToolTip="Search (Ctrl+F)" AutomationProperties.Name="Search">
+                    <FontIcon Glyph="&#xE721;" FontSize="14" />
+                </Button>
             </StackPanel>
 
             <Grid x:Name="AddressHost" Grid.Column="1" Height="32" CornerRadius="{ThemeResource ControlCornerRadius}"
@@ -565,8 +570,8 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
-            <TextBlock Grid.Column="1" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.SelectionText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="StatusLabel" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
+            <TextBlock x:Name="SelectionLabel" Grid.Column="1" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.SelectionText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
                 <ToggleButton x:Name="DetailsToggle" Width="32" Height="28" Padding="0" Click="OnDetailsToggleClick" ToolTipService.ToolTip="Details (Ctrl+Shift+6)"
                               AutomationProperties.Name="Details view" Background="Transparent" BorderThickness="0">

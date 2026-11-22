@@ -11,11 +11,15 @@
     <!-- OneCommander-style: categories on the left, a search box that finds any setting, sections on the right. -->
     <Grid x:Name="Layout" ColumnSpacing="8">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="220" />
+            <ColumnDefinition x:Name="SidebarColumn" Width="220" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <StackPanel Padding="16,24,0,16" Spacing="12">
+        <StackPanel x:Name="Sidebar" Grid.RowSpan="2" Padding="16,24,0,16" Spacing="12">
             <TextBlock Text="Settings" Style="{StaticResource TitleTextBlockStyle}" Margin="8,0,0,4" />
             <AutoSuggestBox x:Name="SearchBox" PlaceholderText="Find a setting" QueryIcon="Find"
                             TextChanged="OnSearchChanged" AutomationProperties.Name="Find a setting" />
@@ -50,7 +54,7 @@
             </ListView>
         </StackPanel>
 
-        <ScrollViewer x:Name="Scroller" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
+        <ScrollViewer x:Name="Scroller" Grid.Column="1" Grid.RowSpan="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalScrollMode="Disabled">
             <StackPanel x:Name="Body" Padding="16,24,32,32" Spacing="4" HorizontalAlignment="Left">
                 <TextBlock x:Name="NoMatches" Text="No setting matches that. Try another word, such as theme, hidden, terminal or Win+E."
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
