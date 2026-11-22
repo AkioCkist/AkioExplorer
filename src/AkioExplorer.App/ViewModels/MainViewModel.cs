@@ -267,6 +267,83 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    // ------------------------------------------------------------------ view toggles (View menu, palette)
+
+    public bool ShowHiddenItems
+    {
+        get => _settings.Current.ShowHiddenItems;
+        set => SetSetting(() => _settings.Current.ShowHiddenItems = value, _settings.Current.ShowHiddenItems != value);
+    }
+
+    public bool ShowFileExtensions
+    {
+        get => _settings.Current.ShowFileExtensions;
+        set => SetSetting(() => _settings.Current.ShowFileExtensions = value, _settings.Current.ShowFileExtensions != value);
+    }
+
+    public bool AutoFolderSizes
+    {
+        get => _settings.Current.AutoFolderSizes;
+        set => SetSetting(() => _settings.Current.AutoFolderSizes = value, _settings.Current.AutoFolderSizes != value);
+    }
+
+    private void SetSetting(Action apply, bool changed, [System.Runtime.CompilerServices.CallerMemberName] string? property = null)
+    {
+        if (!changed) return;
+        apply();
+        _settings.NotifyChanged(); // panes re-filter / re-label live
+        OnPropertyChanged(property);
+    }
+
+    // ------------------------------------------------------------------ compare panes
+
+    /// <summary>
+    /// Selects, in both panes, what differs: items only on one side, and for files on both sides the newer one
+    /// (or both when only the size differs). Returns a short summary for the status message.
+    /// </summary>
+    public string? ComparePanes()
+    {
+        if (!IsDualPane || LeftPane.Location is null || RightPane.Location is null)
+            return null;
+
+        var left = LeftPane.Items.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
+        var right = RightPane.Items.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
+        var pickLeft = new List<FileItemViewModel>();
+        var pickRight = new List<FileItemViewModel>();
+        int onlyLeft = 0, onlyRight = 0, different = 0;
+
+        foreach (var (name, l) in left)
+        {
+            if (!right.TryGetValue(name, out var r))
+            {
+                pickLeft.Add(l);
+                onlyLeft++;
+                continue;
+            }
+            if (l.IsContainer || r.IsContainer) continue;
+            var lt = l.Item.Modified;
+            var rt = r.Item.Modified;
+            bool sameSize = l.Item.Size == r.Item.Size;
+            double seconds = lt is { } a && rt is { } b ? (a - b).TotalSeconds : 0;
+            if (Math.Abs(seconds) <= 2 && sameSize) continue; // FAT/zip timestamps are 2 s precise
+            different++;
+            if (seconds > 2) pickLeft.Add(l);
+            else if (seconds < -2) pickRight.Add(r);
+            else { pickLeft.Add(l); pickRight.Add(r); }
+        }
+        foreach (var (name, r) in right)
+        {
+            if (left.ContainsKey(name)) continue;
+            pickRight.Add(r);
+            onlyRight++;
+        }
+
+        LeftPane.SelectItems(LeftPane.Items.Where(pickLeft.Contains).ToList());
+        RightPane.SelectItems(RightPane.Items.Where(pickRight.Contains).ToList());
+        if (onlyLeft + onlyRight + different == 0) return "Both folders have the same items.";
+        return $"Selected differences: {onlyLeft:N0} only left · {onlyRight:N0} only right · {different:N0} changed (newer side selected)";
+    }
+
     private bool CanUndo() => _undo.CanUndo;
 
     [RelayCommand(CanExecute = nameof(CanUndo))]

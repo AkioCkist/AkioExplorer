@@ -67,6 +67,19 @@ Full steps and troubleshooting: [docs/CLOUD-SETUP.md#google-drive](docs/CLOUD-SE
 - Settings: download folder
 - Debug builds only: AKIO_DEV_CLOUD=<folder> adds a folder-backed fake cloud for testing transfer UI without OAuth
 
+## Status – Phase 5a (Power tools) – implemented, UI not yet hand-tested
+
+Plan and gap analysis vs OneCommander / Google Drive: [docs/FEATURE-PLAN.md](docs/FEATURE-PLAN.md).
+
+- Tabs per pane (Ctrl+T / Ctrl+W / Ctrl+Tab / Ctrl+Shift+T, middle-click a folder, drag to reorder, restored on start)
+- Command palette (Ctrl+Shift+P): every command with its shortcut, plus "Go to" favorites, folders, drives, accounts
+- Batch rename (Ctrl+M, or F2 with several items): masks `[N] [N2-5] [E] [C] [P] [YMD] [hms]`, counter, find/replace (regex), case, live preview, one undo
+- Selection: none, invert, by pattern (Num + / Num -), same type; compare panes (select differences)
+- New text document, duplicate, copy name, Open in Terminal, Hidden / Read-only attributes
+- ZIP compress / extract, checksums (MD5, SHA-1, SHA-256, SHA-512), folder sizes (on demand or automatic)
+- View › Hidden items (Ctrl+H), File name extensions, Folder sizes
+- Faster local copy (8 small files at a time, big files one at a time, no per-file lookups in new folders): ~2.7 s → ~1.0 s for 3,000 small files + 256 MB in the benchmark (`$env:AKIO_BENCH=1; dotnet test --filter CopyBenchmark`); deleted rows disappear instantly, permanent delete of big trees in parallel
+
 ## Requirements
 
 - Windows 10 1809+ / Windows 11
@@ -108,4 +121,14 @@ Set `AKIO_DEBUG_LOG=1` to write debug-level logs.
 | Properties | Alt+Enter |
 | Focus sidebar | Ctrl+1 |
 | Jump to item | type its first letters |
+| Command palette | Ctrl+Shift+P |
+| New tab / close / reopen closed | Ctrl+T / Ctrl+W / Ctrl+Shift+T |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Batch rename | Ctrl+M (F2 with several items) |
+| Select none / invert | Ctrl+Shift+A / Ctrl+I (Num *) |
+| Select / deselect by pattern | Num + / Num - |
+| New text document | Ctrl+Alt+N |
+| Folder sizes | Ctrl+Alt+S |
+| Open in Terminal | Ctrl+Alt+T |
+| Show hidden items | Ctrl+H |
 

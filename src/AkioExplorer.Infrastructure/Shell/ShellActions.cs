@@ -50,4 +50,30 @@ public sealed class ShellActions : IShellActions
         string args = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{path}\"";
         Process.Start(new ProcessStartInfo("explorer.exe", args) { UseShellExecute = true })?.Dispose();
     }
+
+    public void OpenTerminal(string folder)
+    {
+        if (!Directory.Exists(folder))
+            throw new StorageException(StorageErrorKind.NotFound, "Open a folder first, then open the terminal there.");
+
+        // wt.exe is an app execution alias in %LocalAppData%\Microsoft\WindowsApps when Windows Terminal is installed.
+        string wt = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps", "wt.exe");
+        try
+        {
+            if (File.Exists(wt))
+            {
+                // ArgumentList quotes correctly, including a trailing backslash ("C:\").
+                var start = new ProcessStartInfo(wt) { UseShellExecute = false };
+                start.ArgumentList.Add("-d");
+                start.ArgumentList.Add(folder);
+                Process.Start(start)?.Dispose();
+                return;
+            }
+            Process.Start(new ProcessStartInfo("powershell.exe") { WorkingDirectory = folder, UseShellExecute = true })?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            throw new StorageException(StorageErrorKind.Unknown, $"Couldn't open a terminal: {ex.Message}", ex);
+        }
+    }
 }

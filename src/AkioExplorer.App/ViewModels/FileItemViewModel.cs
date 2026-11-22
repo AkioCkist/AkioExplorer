@@ -15,7 +15,26 @@ public sealed partial class FileItemViewModel : ObservableObject
     private bool _largeRequested;
 
     [ObservableProperty] private StorageItem _item;
-    [ObservableProperty] private string _name;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayName))]
+    private string _name;
+
+    /// <summary>App-wide "File name extensions" (View menu / Settings).</summary>
+    public static bool ShowExtensions { get; set; } = true;
+
+    /// <summary>Name as shown in the list: without the extension when extensions are hidden.</summary>
+    public string DisplayName
+    {
+        get
+        {
+            if (ShowExtensions || Item.Kind != StorageItemKind.File) return Name;
+            string stem = System.IO.Path.GetFileNameWithoutExtension(Name);
+            return stem.Length == 0 ? Name : stem; // ".gitignore" keeps its name
+        }
+    }
+
+    public void RefreshDisplayName() => OnPropertyChanged(nameof(DisplayName));
     [ObservableProperty] private string _sizeText = string.Empty;
     [ObservableProperty] private string _modifiedText = string.Empty;
     [ObservableProperty] private string _secondaryText;
@@ -118,7 +137,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         var item = Item;
         SizeText = item.Kind switch
         {
-            StorageItemKind.File when item.Size is { } size => Formatting.FormatSize(size),
+            StorageItemKind.File or StorageItemKind.Folder when item.Size is { } size => Formatting.FormatSize(size),
             StorageItemKind.Drive when item.TotalSize is not null => $"{Formatting.FormatSize(item.FreeSpace ?? 0)} free",
             _ => string.Empty,
         };

@@ -324,9 +324,9 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    DeletePermanently(p);
+                    DeletePermanently(p, cancellationToken);
                 }
-                catch (Exception ex) when (ex is not StorageException)
+                catch (Exception ex) when (ex is not StorageException and not OperationCanceledException)
                 {
                     throw MapException(ex, p);
                 }
@@ -337,10 +337,35 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
         SendToRecycleBin(paths);
     }, cancellationToken);
 
-    private static void DeletePermanently(string path)
+    private static void DeletePermanently(string path, CancellationToken cancellationToken)
     {
         if (Directory.Exists(path))
         {
+            // Big trees: delete the files several at a time first (SSDs handle parallel metadata updates well),
+            // then the now-empty folders in one pass. Junctions are removed, never followed.
+            try
+            {
+                // Skipping reparse points means junctions and symlinks are never entered (their targets stay intact).
+                var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true };
+                var files = new DirectoryInfo(path).EnumerateFiles("*", options).ToList();
+                if (files.Count > 64)
+                {
+                    Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = cancellationToken }, file =>
+                    {
+                        try
+                        {
+                            if ((file.Attributes & FileAttributes.ReadOnly) != 0) file.Attributes = FileAttributes.Normal;
+                            file.Delete();
+                        }
+                        catch (IOException) { }               // left for Directory.Delete below, which reports it
+                        catch (UnauthorizedAccessException) { }
+                    });
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+
             try
             {
                 Directory.Delete(path, recursive: true);

@@ -46,6 +46,19 @@
             <KeyboardAccelerator Modifiers="Control" Key="C" Invoked="OnCopyAccelerator" />
             <KeyboardAccelerator Modifiers="Control" Key="X" Invoked="OnCutAccelerator" />
             <KeyboardAccelerator Modifiers="Control" Key="V" Invoked="OnPasteAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="P" Invoked="OnPaletteAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="T" Invoked="OnNewTabAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="W" Invoked="OnCloseTabAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="T" Invoked="OnReopenTabAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="Tab" Invoked="OnNextTabAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="Tab" Invoked="OnPreviousTabAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="M" Invoked="OnBatchRenameAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Shift" Key="A" Invoked="OnSelectNoneAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="I" Invoked="OnInvertSelectionAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Menu" Key="N" Invoked="OnNewFileAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Menu" Key="S" Invoked="OnFolderSizesAccelerator" />
+            <KeyboardAccelerator Modifiers="Control,Menu" Key="T" Invoked="OnTerminalAccelerator" />
+            <KeyboardAccelerator Modifiers="Control" Key="H" Invoked="OnHiddenItemsAccelerator" />
         </Grid.KeyboardAccelerators>
 
         <!-- Custom title bar (draggable region) -->
@@ -189,6 +202,11 @@
                                     <RadioMenuFlyoutItem x:Name="ViewGrid" Text="Grid" GroupName="view" Click="OnViewGridClick" KeyboardAcceleratorTextOverride="Ctrl+Shift+2">
                                         <RadioMenuFlyoutItem.Icon><FontIcon Glyph="&#xF0E2;" /></RadioMenuFlyoutItem.Icon>
                                     </RadioMenuFlyoutItem>
+                                    <MenuFlyoutSeparator />
+                                    <ToggleMenuFlyoutItem x:Name="ViewHidden" Text="Hidden items" Click="OnViewHiddenClick" KeyboardAcceleratorTextOverride="Ctrl+H" />
+                                    <ToggleMenuFlyoutItem x:Name="ViewExtensions" Text="File name extensions" Click="OnViewExtensionsClick" />
+                                    <ToggleMenuFlyoutItem x:Name="ViewFolderSizes" Text="Folder sizes (this PC)" Click="OnViewFolderSizesClick"
+                                                          ToolTipService.ToolTip="Calculate folder sizes automatically as you browse" />
                                 </MenuFlyout>
                             </AppBarButton.Flyout>
                         </AppBarButton>
@@ -201,6 +219,49 @@
                                             ToolTipService.ToolTip="Preview pane (Alt+P)">
                             <AppBarToggleButton.Icon><FontIcon Glyph="&#xE89F;" /></AppBarToggleButton.Icon>
                         </AppBarToggleButton>
+
+                        <!-- Power tools live in the overflow menu to keep the bar short; every one is also in the command palette. -->
+                        <CommandBar.SecondaryCommands>
+                            <AppBarButton Label="Command palette…" KeyboardAcceleratorTextOverride="Ctrl+Shift+P" Click="OnPaletteClick">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE721;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarSeparator />
+                            <AppBarButton Label="New tab" KeyboardAcceleratorTextOverride="Ctrl+T" Command="{x:Bind ViewModel.ActivePane.NewTabCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE737;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="New text document" KeyboardAcceleratorTextOverride="Ctrl+Alt+N" Command="{x:Bind ViewModel.ActivePane.NewTextFileCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE8A5;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Rename many…" KeyboardAcceleratorTextOverride="Ctrl+M" Command="{x:Bind ViewModel.ActivePane.BatchRenameCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE8AC;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarSeparator />
+                            <AppBarButton Label="Invert selection" KeyboardAcceleratorTextOverride="Ctrl+I" Command="{x:Bind ViewModel.ActivePane.InvertSelectionCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE762;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Select by pattern…" Click="OnSelectByPatternClick">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE71C;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Compare panes" Click="OnComparePanesClick" IsEnabled="{x:Bind ViewModel.IsDualPane, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE9D5;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarSeparator />
+                            <AppBarButton Label="Compress to ZIP" Command="{x:Bind ViewModel.ActivePane.CompressCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xF012;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Extract to folder" Command="{x:Bind ViewModel.ActivePane.ExtractToFolderCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE8B7;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Checksums…" Command="{x:Bind ViewModel.ActivePane.ChecksumCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE72E;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Calculate folder sizes" KeyboardAcceleratorTextOverride="Ctrl+Alt+S" Command="{x:Bind ViewModel.ActivePane.CalculateFolderSizesCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xEDA2;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Label="Open in Terminal" KeyboardAcceleratorTextOverride="Ctrl+Alt+T" Command="{x:Bind ViewModel.ActivePane.OpenTerminalCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE756;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                        </CommandBar.SecondaryCommands>
                     </CommandBar>
 
                     <Grid x:Name="PanesGrid" Grid.Row="1">

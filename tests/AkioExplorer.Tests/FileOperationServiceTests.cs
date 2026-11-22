@@ -227,7 +227,7 @@ public sealed class FileOperationServiceTests : IDisposable
         Assert.Equal(".gitignore - Copy", ConflictNaming.Candidates(".gitignore", true).First());
     }
 
-    private sealed class FakeSettings : ISettingsService
+    internal sealed class FakeSettings : ISettingsService
     {
         public AppSettings Current { get; } = new();
         public event EventHandler? Changed;
@@ -236,7 +236,7 @@ public sealed class FileOperationServiceTests : IDisposable
         public void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    private sealed class FakeResolver : IConflictResolver
+    internal sealed class FakeResolver : IConflictResolver
     {
         public ConflictDecision Answer { get; set; } = new(ConflictResolution.Skip, false);
         public int Calls { get; private set; }

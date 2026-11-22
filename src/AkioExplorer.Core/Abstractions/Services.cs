@@ -62,4 +62,7 @@ public interface IShellActions
     void ShowProperties(string path);
 
     void RevealInExplorer(string path);
+
+    /// <summary>Opens Windows Terminal (or PowerShell when it isn't installed) in <paramref name="folder"/>.</summary>
+    void OpenTerminal(string folder);
 }

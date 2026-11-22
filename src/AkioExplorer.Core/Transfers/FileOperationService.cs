@@ -14,6 +14,12 @@ public sealed class FileOperationService : IFileOperationService
 {
     private const int MaxAttempts = 3;
 
+    /// <summary>Disk to disk: small files copy 8 at a time (like robocopy /MT), so per-file overhead overlaps.</summary>
+    private const int LocalSmallFileSlots = 8;
+
+    /// <summary>Files at least this big copy one at a time between disks: parallel big writes only make the disk seek.</summary>
+    private const long LocalLargeFile = 8L * 1024 * 1024;
+
     private readonly IStorageProviderRegistry _registry;
     private readonly IReadOnlyList<ITransferExecutor> _executors;
     private readonly SemaphoreSlim _conflictGate = new(1);
@@ -111,6 +117,23 @@ public sealed class FileOperationService : IFileOperationService
 
     private sealed record PlannedFile(StorageItem Item, string RelativeFolder);
 
+    /// <summary>
+    /// Concurrency for one operation. Cloud: <c>Files</c> slots for every file. Disk to disk: small files share the
+    /// many slots, large files also take the single <c>Large</c> slot so only one big file streams at a time.
+    /// </summary>
+    private sealed class Slots(int files, bool splitLarge) : IDisposable
+    {
+        public SemaphoreSlim Files { get; } = new(files);
+
+        public SemaphoreSlim? Large { get; } = splitLarge ? new SemaphoreSlim(1) : null;
+
+        public void Dispose()
+        {
+            Files.Dispose();
+            Large?.Dispose();
+        }
+    }
+
     private sealed class TopLevel(StorageItem item, bool sameFolder)
     {
         public StorageItem Item { get; } = item;
@@ -176,11 +199,11 @@ public sealed class FileOperationService : IFileOperationService
         }
 
         op.SetStatus(OperationStatus.Running);
-        // Cloud transfers move several files at once: per-file latency (session setup, chunk confirmations, small
-        // files) dominates otherwise. Disk-to-disk copies stay sequential – parallel writes only make the disk seek.
+        // Several files at once: per-file latency (cloud session setup and confirmations; on disks, opening, creating
+        // and closing each small file) dominates otherwise. Big local files still go one at a time (see Slots).
         bool bothLocal = (src.Capabilities & dst.Capabilities & StorageCapabilities.OpenWithShell) != 0;
-        int parallel = bothLocal ? 1 : Math.Clamp(_settings.Current.ParallelFileTransfers, 1, 8);
-        using var slots = new SemaphoreSlim(parallel);
+        int parallel = bothLocal ? LocalSmallFileSlots : Math.Clamp(_settings.Current.ParallelFileTransfers, 1, 8);
+        using var slots = new Slots(parallel, splitLarge: bothLocal);
         if (parallel == 1)
         {
             foreach (var top in plan)
@@ -224,7 +247,7 @@ public sealed class FileOperationService : IFileOperationService
     }
 
     private async Task TransferTopLevelAsync(FileOperation op, ITransferExecutor executor, IStorageProvider src, IStorageProvider dst,
-        string destRoot, TopLevel top, SemaphoreSlim slots, CancellationToken ct)
+        string destRoot, TopLevel top, Slots slots, CancellationToken ct)
     {
         await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         var item = top.Item;
@@ -241,17 +264,23 @@ public sealed class FileOperationService : IFileOperationService
             // An existing folder with the same name is merged; conflicts are handled per file inside it.
 
             var folderPaths = new Dictionary<string, string>(StringComparer.Ordinal) { [string.Empty] = topTarget };
+            // Folders this operation creates start empty: nothing inside can clash, so their files skip the per-file
+            // "does it exist?" lookup and their subfolders skip it too (thousands of round trips saved).
+            var fresh = new HashSet<string>(StringComparer.Ordinal);
             foreach (var relative in top.Folders)
             {
                 string path = ResolveFolder(dst, folderPaths, relative);
-                await EnsureFolderAsync(dst, path, ct).ConfigureAwait(false);
+                bool parentFresh = relative.Length > 0 && fresh.Contains(ParentRelative(relative));
+                if (await EnsureFolderAsync(dst, path, knownMissing: parentFresh, ct).ConfigureAwait(false)) fresh.Add(relative);
             }
 
             // Folder paths are all resolved above, so the cache is only read from here on (safe in parallel).
             await Task.WhenAll(top.Files.Select(async file =>
             {
                 string folder = ResolveFolder(dst, folderPaths, file.RelativeFolder);
-                if (await InSlotAsync(slots, () => TransferFileAsync(op, executor, src, dst, file.Item, folder, inPlaceCopy: false, ct), ct)
+                bool empty = fresh.Contains(file.RelativeFolder);
+                if (await InSlotAsync(slots, file.Item,
+                            () => TransferFileAsync(op, executor, src, dst, file.Item, folder, inPlaceCopy: false, ct, targetKnownFree: empty), ct)
                         .ConfigureAwait(false) is null)
                     top.Incomplete = true;
             })).ConfigureAwait(false);
@@ -260,7 +289,7 @@ public sealed class FileOperationService : IFileOperationService
         }
         else
         {
-            string? written = await InSlotAsync(slots, () => TransferFileAsync(op, executor, src, dst, item, destRoot, top.SameFolder, ct), ct)
+            string? written = await InSlotAsync(slots, item, () => TransferFileAsync(op, executor, src, dst, item, destRoot, top.SameFolder, ct), ct)
                 .ConfigureAwait(false);
             if (written is null) top.Incomplete = true;
             else
@@ -292,22 +321,38 @@ public sealed class FileOperationService : IFileOperationService
         }
     }
 
-    private static async Task<T> InSlotAsync<T>(SemaphoreSlim slots, Func<Task<T>> work, CancellationToken ct)
+    private static async Task<T> InSlotAsync<T>(Slots slots, StorageItem file, Func<Task<T>> work, CancellationToken ct)
     {
-        await slots.WaitAsync(ct).ConfigureAwait(false);
+        var large = slots.Large is { } gate && (file.Size ?? 0) >= LocalLargeFile ? gate : null;
+        if (large is not null) await large.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await work().ConfigureAwait(false);
+            await slots.Files.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await work().ConfigureAwait(false);
+            }
+            finally
+            {
+                slots.Files.Release();
+            }
         }
         finally
         {
-            slots.Release();
+            large?.Release();
         }
     }
 
+    private static string ParentRelative(string relative)
+    {
+        int cut = relative.LastIndexOf('\u0000');
+        return cut < 0 ? string.Empty : relative[..cut];
+    }
+
     /// <summary>Copies one file into <paramref name="folder"/>. Returns the written path, or null if skipped/failed.</summary>
+    /// <param name="targetKnownFree">The folder was created by this operation, so the name can't be taken yet.</param>
     private async Task<string?> TransferFileAsync(FileOperation op, ITransferExecutor executor, IStorageProvider src, IStorageProvider dst,
-        StorageItem file, string folder, bool inPlaceCopy, CancellationToken ct)
+        StorageItem file, string folder, bool inPlaceCopy, CancellationToken ct, bool targetKnownFree = false)
     {
         await op.WaitIfPausedAsync(ct).ConfigureAwait(false);
         long size = file.Size ?? 0;
@@ -317,7 +362,7 @@ public sealed class FileOperationService : IFileOperationService
             : dst.CombinePath(folder, name);
         bool overwrite = false;
 
-        if (!inPlaceCopy && await dst.GetItemAsync(target, ct).ConfigureAwait(false) is { } existing)
+        if (!inPlaceCopy && !targetKnownFree && await dst.GetItemAsync(target, ct).ConfigureAwait(false) is { } existing)
         {
             if (op.Options.SkipIdentical && !existing.IsContainer && existing.Size == file.Size && file.Size is not null)
             {
@@ -445,17 +490,21 @@ public sealed class FileOperationService : IFileOperationService
         return path;
     }
 
-    private static async Task EnsureFolderAsync(IStorageProvider dst, string path, CancellationToken ct)
+    /// <summary>Creates the folder unless it exists. Returns true when this call created it (so it is empty).</summary>
+    /// <param name="knownMissing">The parent was just created, so there is no need to look first.</param>
+    private static async Task<bool> EnsureFolderAsync(IStorageProvider dst, string path, bool knownMissing, CancellationToken ct)
     {
-        if (await dst.GetItemAsync(path, ct).ConfigureAwait(false) is { IsContainer: true }) return;
+        if (!knownMissing && await dst.GetItemAsync(path, ct).ConfigureAwait(false) is { IsContainer: true }) return false;
         string parent = dst.GetParentPath(path) ?? string.Empty;
         string name = dst.GetDisplayName(path);
         try
         {
             await dst.CreateFolderAsync(parent, name, ct).ConfigureAwait(false);
+            return true;
         }
         catch (StorageException ex) when (ex.Kind == StorageErrorKind.AlreadyExists)
         {
+            return false;
         }
     }
 

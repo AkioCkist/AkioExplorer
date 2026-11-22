@@ -18,6 +18,7 @@ public sealed class LocalTransferExecutor : ITransferExecutor
     private const uint PROGRESS_CANCEL = 1;
     private const int ERROR_REQUEST_ABORTED = 1235;
     private const long UnbufferedThreshold = 256L * 1024 * 1024;
+    private const long LongRunningThreshold = 16L * 1024 * 1024;
 
     private delegate uint CopyProgressRoutine(long totalFileSize, long totalBytesTransferred, long streamSize, long streamBytesTransferred,
         uint streamNumber, uint callbackReason, IntPtr sourceFile, IntPtr destinationFile, IntPtr data);
@@ -72,7 +73,12 @@ public sealed class LocalTransferExecutor : ITransferExecutor
             if (error == ERROR_REQUEST_ABORTED || cancellationToken.IsCancellationRequested)
                 throw new OperationCanceledException(cancellationToken);
             throw Map(error, file.Name);
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        },
+        cancellationToken,
+        // A dedicated thread only pays off for long copies; for thousands of small files creating one thread per
+        // file cost more than the copy itself.
+        (file.Size ?? 0) >= LongRunningThreshold ? TaskCreationOptions.LongRunning : TaskCreationOptions.None,
+        TaskScheduler.Default);
     }
 
     public Task<bool> TryMoveAsync(IStorageProvider source, StorageItem item, IStorageProvider destination, string destinationPath, CancellationToken cancellationToken)

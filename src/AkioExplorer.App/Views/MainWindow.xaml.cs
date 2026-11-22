@@ -626,7 +626,146 @@ public sealed partial class MainWindow : Window
     {
         ViewDetails.IsChecked = ViewModel.ActivePane.IsDetailsView;
         ViewGrid.IsChecked = ViewModel.ActivePane.IsGridView;
+        ViewHidden.IsChecked = ViewModel.ShowHiddenItems;
+        ViewExtensions.IsChecked = ViewModel.ShowFileExtensions;
+        ViewFolderSizes.IsChecked = ViewModel.AutoFolderSizes;
     }
+
+    // ------------------------------------------------------------------ power tools (overflow menu, palette)
+
+    private void OnPaletteClick(object sender, RoutedEventArgs e) => _ = ShowPaletteAsync();
+
+    private void OnSelectByPatternClick(object sender, RoutedEventArgs e) => ViewModel.ActivePane.RequestDialog(PaneDialog.SelectByPattern);
+
+    private void OnComparePanesClick(object sender, RoutedEventArgs e) => ComparePanes();
+
+    private void ComparePanes()
+    {
+        var summary = ViewModel.ComparePanes();
+        if (summary is null) ViewModel.ActivePane.ShowError("Turn on dual pane (Ctrl+Shift+D) and open the two folders to compare.");
+        else ViewModel.ActivePane.ShowMessage(summary, isError: false);
+    }
+
+    private async Task ShowPaletteAsync()
+    {
+        ShowExplorer();
+        await CommandPalette.ShowAsync(_dialogs, BuildPaletteCommands());
+    }
+
+    /// <summary>Every command of the app, for the palette. Commands read the active pane when they run.</summary>
+    private List<PaletteCommand> BuildPaletteCommands()
+    {
+        FilePaneViewModel P() => ViewModel.ActivePane;
+        var list = new List<PaletteCommand>();
+
+        void Cmd(string title, string category, string? keys, string glyph, Func<bool> can, Action run, string keywords = "") =>
+            list.Add(new PaletteCommand(title, category, keys, glyph, can, run) { Keywords = keywords });
+        void Rc(string title, string category, string? keys, string glyph, Func<FilePaneViewModel, System.Windows.Input.ICommand> command, string keywords = "") =>
+            Cmd(title, category, keys, glyph, () => command(P()).CanExecute(null), () => command(P()).Execute(null), keywords);
+        void Focus() => DispatcherQueue.TryEnqueue(() => ViewFor(P()).FocusList());
+
+        // File
+        Rc("New folder", "File", "Ctrl+Shift+N", "", p => p.NewFolderCommand, "create directory");
+        Rc("New text document", "File", "Ctrl+Alt+N", "", p => p.NewTextFileCommand, "create file txt");
+        Rc("Rename", "File", "F2", "", p => p.RenameCommand);
+        Rc("Rename many (batch rename)…", "File", "Ctrl+M", "", p => p.BatchRenameCommand, "multi rename regex counter replace");
+        Rc("Duplicate", "File", null, "", p => p.DuplicateCommand, "copy make a copy");
+        Rc("Delete to Recycle Bin", "File", "Del", "", p => p.DeleteCommand, "remove trash");
+        Rc("Delete permanently", "File", "Shift+Del", "", p => p.DeletePermanentlyCommand, "remove erase");
+        Rc("Compress to ZIP", "File", null, "", p => p.CompressCommand, "zip archive pack");
+        Rc("Extract here", "File", null, "", p => p.ExtractHereCommand, "unzip archive unpack");
+        Rc("Extract to folder", "File", null, "", p => p.ExtractToFolderCommand, "unzip archive unpack");
+        Rc("Checksums (MD5, SHA-1, SHA-256)…", "File", null, "", p => p.ChecksumCommand, "hash verify");
+        Rc("Toggle Hidden attribute", "File", null, "", p => p.ToggleHiddenAttributeCommand, "attributes hide");
+        Rc("Toggle Read-only attribute", "File", null, "", p => p.ToggleReadOnlyAttributeCommand, "attributes lock protect");
+        Rc("Open with…", "File", null, "", p => p.OpenWithCommand);
+        Rc("Properties", "File", "Alt+Enter", "", p => p.ShowPropertiesCommand);
+
+        // Edit
+        Rc("Cut", "Edit", "Ctrl+X", "", p => p.CutCommand);
+        Rc("Copy", "Edit", "Ctrl+C", "", p => p.CopyCommand);
+        Rc("Paste", "Edit", "Ctrl+V", "", p => p.PasteCommand);
+        Cmd("Undo", "Edit", "Ctrl+Z", "", () => ViewModel.UndoCommand.CanExecute(null), () => ViewModel.UndoCommand.Execute(null));
+        Rc("Copy path", "Edit", "Ctrl+Shift+C", "", p => p.CopyPathCommand);
+        Rc("Copy name", "Edit", null, "", p => p.CopyNameCommand);
+        Cmd("Copy to other pane", "Edit", null, "", () => ViewModel.IsDualPane && P().HasCopyableSelection, () => ViewModel.TransferToOtherPane(P(), OperationKind.Copy));
+        Cmd("Move to other pane", "Edit", null, "", () => ViewModel.IsDualPane && P().HasMovableSelection, () => ViewModel.TransferToOtherPane(P(), OperationKind.Move));
+
+        // Select
+        Cmd("Select all", "Select", "Ctrl+A", "", () => true, () => { P().SelectAllCommand.Execute(null); Focus(); });
+        Cmd("Select none", "Select", "Ctrl+Shift+A", "", () => true, () => P().SelectNoneCommand.Execute(null));
+        Cmd("Invert selection", "Select", "Ctrl+I", "", () => true, () => { P().InvertSelectionCommand.Execute(null); Focus(); });
+        Cmd("Select by pattern…", "Select", "Num +", "", () => true, () => P().RequestDialog(PaneDialog.SelectByPattern), "wildcard filter");
+        Cmd("Deselect by pattern…", "Select", "Num -", "", () => true, () => P().RequestDialog(PaneDialog.DeselectByPattern), "wildcard");
+        Rc("Select same type", "Select", null, "", p => p.SelectSameTypeCommand, "extension");
+        Cmd("Compare panes (select differences)", "Select", null, "", () => ViewModel.IsDualPane, ComparePanes, "diff sync newer");
+
+        // Tabs
+        Rc("New tab", "Tabs", "Ctrl+T", "", p => p.NewTabCommand);
+        Rc("Open selection in new tab", "Tabs", "Middle-click", "", p => p.OpenSelectionInNewTabCommand);
+        Cmd("Close tab", "Tabs", "Ctrl+W", "", () => P().HasTabs, () => P().CloseTabCommand.Execute(null));
+        Cmd("Close other tabs", "Tabs", null, "", () => P().HasTabs, () => P().CloseOtherTabsCommand.Execute(null));
+        Rc("Reopen closed tab", "Tabs", "Ctrl+Shift+T", "", p => p.ReopenClosedTabCommand);
+        Cmd("Next tab", "Tabs", "Ctrl+Tab", "", () => P().HasTabs, () => P().NextTabCommand.Execute(null));
+        Cmd("Previous tab", "Tabs", "Ctrl+Shift+Tab", "", () => P().HasTabs, () => P().PreviousTabCommand.Execute(null));
+
+        // Navigate
+        Rc("Back", "Navigate", "Alt+Left", "", p => p.GoBackCommand);
+        Rc("Forward", "Navigate", "Alt+Right", "", p => p.GoForwardCommand);
+        Rc("Up to parent folder", "Navigate", "Alt+Up", "", p => p.GoUpCommand);
+        Rc("Refresh", "Navigate", "F5", "", p => p.RefreshCommand, "reload");
+        Cmd("Type a path", "Navigate", "Ctrl+L", "", () => true, () => P().RequestAddressEdit(), "address bar go to");
+        Cmd("Search", "Navigate", "Ctrl+F", "", () => P().CanSearch, () => P().RequestFilterFocus(), "find filter");
+        Cmd("Advanced search…", "Navigate", "Ctrl+Shift+F", "", () => P().CanSearch, () => P().RequestAdvancedSearch(), "find filter");
+        Rc("Pin / unpin to Favorites", "Navigate", null, "", p => p.ToggleFavoriteCommand, "bookmark star");
+        Rc("Open in Terminal", "Navigate", "Ctrl+Alt+T", "", p => p.OpenTerminalCommand, "powershell cmd console shell");
+        Rc("Show in File Explorer", "Navigate", null, "", p => p.RevealInExplorerCommand);
+        Cmd("Open in other pane", "Navigate", null, "", () => true, () => P().RequestOpenInOtherPane());
+
+        // View
+        Cmd("Details view", "View", "Ctrl+Shift+6", "", () => true, () => P().ViewMode = FileViewMode.Details, "list");
+        Cmd("Grid view", "View", "Ctrl+Shift+2", "", () => true, () => P().ViewMode = FileViewMode.Grid, "icons thumbnails");
+        Cmd(ViewModel.ShowHiddenItems ? "Hide hidden items" : "Show hidden items", "View", "Ctrl+H", "", () => true, () => ViewModel.ShowHiddenItems = !ViewModel.ShowHiddenItems);
+        Cmd(ViewModel.ShowFileExtensions ? "Hide file name extensions" : "Show file name extensions", "View", null, "", () => true, () => ViewModel.ShowFileExtensions = !ViewModel.ShowFileExtensions);
+        Cmd(ViewModel.AutoFolderSizes ? "Stop calculating folder sizes automatically" : "Calculate folder sizes automatically", "View", null, "", () => true, () => ViewModel.AutoFolderSizes = !ViewModel.AutoFolderSizes);
+        Rc("Calculate folder sizes now", "View", "Ctrl+Alt+S", "", p => p.CalculateFolderSizesCommand);
+        Cmd("Dual pane on / off", "View", "Ctrl+Shift+D", "", () => true, () => ViewModel.ToggleDualPaneCommand.Execute(null), "split two panes");
+        Cmd("Switch pane", "View", "F6", "", () => ViewModel.IsDualPane, () => ViewModel.SwitchPaneCommand.Execute(null));
+        Cmd("Preview pane on / off", "View", "Alt+P", "", () => true, () => ViewModel.IsPreviewOpen = !ViewModel.IsPreviewOpen);
+        foreach (var (label, field) in new[] { ("name", SortField.Name), ("date modified", SortField.Modified), ("type", SortField.Type), ("size", SortField.Size) })
+            Cmd($"Sort by {label}", "View", null, "", () => true, () => P().SortField = field);
+        Cmd("Sort ascending / descending", "View", null, "", () => true, () => P().SortDescending = !P().SortDescending, "reverse order");
+        Cmd("Folders first on / off", "View", null, "", () => true, () => P().FoldersFirst = !P().FoldersFirst);
+
+        // App
+        Cmd("Transfer queue", "App", null, "", () => true, () => ShowTransfers(history: false), "downloads uploads");
+        Cmd("Recent transfers", "App", null, "", () => true, () => ShowTransfers(history: true), "history");
+        Cmd("Settings", "App", null, "", () => true, ShowSettings, "options preferences");
+        Cmd("Add cloud account…", "App", null, "", () => true, () => _ = AddCloudAccountAsync(), "google drive dropbox onedrive");
+        Cmd("Focus sidebar", "App", "Ctrl+1", "", () => true, FocusSidebar);
+
+        // Go to: favorites, folders, drives, cloud accounts
+        void Go(string name, StorageLocation location, string glyph) =>
+            Cmd($"Go to {name}", "Go to", null, glyph, () => true, () => _ = NavigateAndFocusAsync(location), location.Path);
+        foreach (var f in ViewModel.Favorites) Go(f.Name, new StorageLocation(f.ProviderId, f.Path), "");
+        foreach (var k in ViewModel.KnownFolders) Go(k.Name, new StorageLocation("local", k.Path), k.Glyph);
+        foreach (var d in ViewModel.Drives) Go(d.Name, new StorageLocation("local", d.Path), "");
+        foreach (var a in _cloud.Accounts) Go(a.Name, _cloud.RootOf(a.Account), "");
+        return list;
+    }
+
+    private async Task NavigateAndFocusAsync(StorageLocation location)
+    {
+        ShowExplorer();
+        await ViewModel.NavigateActiveAsync(location);
+        ViewFor(ViewModel.ActivePane).FocusList();
+    }
+
+    private void OnViewHiddenClick(object sender, RoutedEventArgs e) => ViewModel.ShowHiddenItems = ViewHidden.IsChecked;
+
+    private void OnViewExtensionsClick(object sender, RoutedEventArgs e) => ViewModel.ShowFileExtensions = ViewExtensions.IsChecked;
+
+    private void OnViewFolderSizesClick(object sender, RoutedEventArgs e) => ViewModel.AutoFolderSizes = ViewFolderSizes.IsChecked;
 
     private void OnViewDetailsClick(object sender, RoutedEventArgs e) => ViewModel.ActivePane.ViewMode = FileViewMode.Details;
 
@@ -727,9 +866,66 @@ public sealed partial class MainWindow : Window
         if (!TextBoxHasFocus) Run(a, p => p.PasteCommand.Execute(null));
     }
 
+    private void OnPaletteAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        a.Handled = true;
+        _ = ShowPaletteAsync();
+    }
+
+    private void OnNewTabAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => RunAndFocus(a, p => p.NewTabCommand.Execute(null));
+
+    private void OnCloseTabAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => RunAndFocus(a, p => p.CloseTabCommand.Execute(null));
+
+    private void OnReopenTabAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => RunAndFocus(a, p => p.ReopenClosedTabCommand.Execute(null));
+
+    private void OnNextTabAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => RunAndFocus(a, p => p.NextTabCommand.Execute(null));
+
+    private void OnPreviousTabAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => RunAndFocus(a, p => p.PreviousTabCommand.Execute(null));
+
+    private void OnBatchRenameAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        if (!TextBoxHasFocus) Run(a, p => p.BatchRenameCommand.Execute(null));
+    }
+
+    private void OnSelectNoneAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        if (!TextBoxHasFocus) Run(a, p => p.SelectNoneCommand.Execute(null));
+    }
+
+    private void OnInvertSelectionAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        if (!TextBoxHasFocus) Run(a, p => p.InvertSelectionCommand.Execute(null));
+    }
+
+    private void OnNewFileAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.NewTextFileCommand.Execute(null));
+
+    private void OnFolderSizesAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.CalculateFolderSizesCommand.Execute(null));
+
+    private void OnTerminalAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.OpenTerminalCommand.Execute(null));
+
+    private void OnHiddenItemsAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
+    {
+        if (TextBoxHasFocus) return;
+        a.Handled = true;
+        ViewModel.ShowHiddenItems = !ViewModel.ShowHiddenItems;
+        ViewModel.ActivePane.ShowMessage(ViewModel.ShowHiddenItems ? "Hidden items are shown." : "Hidden items are hidden.", isError: false);
+    }
+
+    /// <summary>Tab commands change the listing: keep the keyboard in the list afterwards.</summary>
+    private void RunAndFocus(KeyboardAcceleratorInvokedEventArgs args, Action<FilePaneViewModel> action)
+    {
+        Run(args, action);
+        if (args.Handled) DispatcherQueue.TryEnqueue(() => ViewFor(ViewModel.ActivePane).FocusList());
+    }
+
     private void OnFocusSidebarAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
     {
         a.Handled = true;
+        FocusSidebar();
+    }
+
+    private void FocusSidebar()
+    {
         if (Nav.SelectedItem is NavigationViewItem selected) selected.Focus(FocusState.Keyboard);
         else if (Nav.MenuItems.FirstOrDefault() is NavigationViewItem first) first.Focus(FocusState.Keyboard);
     }

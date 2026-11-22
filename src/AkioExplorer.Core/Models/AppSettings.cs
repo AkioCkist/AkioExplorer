@@ -31,6 +31,16 @@ public sealed class PaneState
     public bool SortDescending { get; set; }
     public bool FoldersFirst { get; set; } = true;
     public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
+
+    /// <summary>Open tabs of this pane (left to right); empty = one tab at <see cref="ProviderId"/>/<see cref="Path"/>.</summary>
+    public List<TabState> Tabs { get; set; } = new();
+    public int ActiveTab { get; set; }
+}
+
+public sealed class TabState
+{
+    public string ProviderId { get; set; } = "local";
+    public string Path { get; set; } = string.Empty;
 }
 
 public sealed class WindowPlacement
@@ -52,6 +62,12 @@ public sealed class AppSettings
     public bool ShowPreviewPane { get; set; }
     public double PreviewPaneWidth { get; set; } = 360;
     public bool ShowHiddenItems { get; set; }
+
+    /// <summary>Show ".txt", ".jpg"… after file names (File Explorer's "File name extensions").</summary>
+    public bool ShowFileExtensions { get; set; } = true;
+
+    /// <summary>Calculate folder sizes automatically when a local folder opens (OneCommander style).</summary>
+    public bool AutoFolderSizes { get; set; }
     public bool RestoreLastLocations { get; set; } = true;
     public ConflictBehavior ConflictBehavior { get; set; } = ConflictBehavior.Ask;
     public int MaxSimultaneousOperations { get; set; } = 2;

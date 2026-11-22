@@ -20,6 +20,9 @@ public enum NavigationKind
     Forward,
     Up,
     Refresh,
+
+    /// <summary>Switching tabs: show the tab's folder (from cache when possible) without touching history.</summary>
+    Restore,
 }
 
 /// <summary>
@@ -44,13 +47,14 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private readonly ClipboardService _clipboard;
     private readonly UndoService _undo;
     private readonly HashSet<string> _pendingSelection = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Paths being deleted in the background: a refresh meanwhile must not bring their rows back.</summary>
+    private readonly HashSet<string> _deleting = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<FilePaneViewModel> _logger;
     private readonly DispatcherQueue _dispatcher;
     private readonly DispatcherQueueTimer _watchDebounce;
     private readonly DispatcherQueueTimer _loadingDelay;
 
-    private readonly Stack<StorageLocation> _back = new();
-    private readonly Stack<StorageLocation> _forward = new();
     private readonly List<FileItemViewModel> _selected = new();
     private List<FileItemViewModel> _all = new();
     private Dictionary<string, FileItemViewModel> _byPath = new(StringComparer.OrdinalIgnoreCase);
@@ -105,7 +109,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _loadingDelay.Tick += (_, _) => IsLoading = true;
 
         _viewMode = settings.Current.DefaultViewMode;
-        settings.Changed += (_, _) => ApplyView(replace: false);
+        FileItemViewModel.ShowExtensions = settings.Current.ShowFileExtensions;
+        InitializeTabs();
+        settings.Changed += (_, _) => OnSettingsChanged();
     }
 
     // ------------------------------------------------------------------ state
@@ -270,7 +276,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     // ------------------------------------------------------------------ navigation
 
-    public async Task NavigateAsync(StorageLocation target, NavigationKind kind = NavigationKind.New)
+    /// <param name="focusPath">Item to select once listed (default: the folder we came from, when going up).</param>
+    public async Task NavigateAsync(StorageLocation target, NavigationKind kind = NavigationKind.New, string? focusPath = null)
     {
         var provider = _registry.Find(target.ProviderId);
         if (provider is null)
@@ -284,6 +291,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         var ct = cts.Token;
         int version = ++_loadVersion;
         var previous = Location;
+        string? focus = focusPath ?? previous?.Path;
         bool committed = false;
         bool fromCache = false;
         if (kind != NavigationKind.Refresh) IsErrorOpen = false;
@@ -292,7 +300,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             Commit(provider, target, kind);
             committed = fromCache = true;
-            ApplyListing(cached, replace: true, focusPath: previous?.Path);
+            ApplyListing(cached, replace: true, focusPath: focus);
         }
 
         _loadingDelay.Start();
@@ -309,7 +317,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
                 {
                     Commit(provider, target, kind);
                     committed = true;
-                    ApplyListing(collected, replace: true, focusPath: previous?.Path);
+                    ApplyListing(collected, replace: true, focusPath: focus);
                 }
             }
 
@@ -318,7 +326,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             if (!committed)
             {
                 Commit(provider, target, kind);
-                ApplyListing(collected, replace: true, focusPath: previous?.Path);
+                ApplyListing(collected, replace: true, focusPath: focus);
             }
             else if (fromCache || kind == NavigationKind.Refresh)
             {
@@ -330,6 +338,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             }
 
             _cache.Set(target, collected.ToArray());
+            StartAutoFolderSizes();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -398,6 +407,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         bool locationChanged = current is null || !current.Equals(target);
         Provider = provider;
         Location = target;
+        UpdateActiveTab(provider, target);
 
         if (IsSearchMode) ExitSearch(applyView: false);
         if (locationChanged)
@@ -407,6 +417,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             SearchFilters = SearchQuery.Empty;
             _suppressFilter = false;
             _selected.Clear();
+            ResetFolderSizes();
 
             Breadcrumb.Clear();
             foreach (var segment in provider.GetBreadcrumb(target.Path)) Breadcrumb.Add(segment);
@@ -564,8 +575,10 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     {
         var newAll = new List<FileItemViewModel>(items.Count);
         var newMap = new Dictionary<string, FileItemViewModel>(items.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var item in items)
+        foreach (var listed in items)
         {
+            if (_deleting.Count > 0 && _deleting.Contains(listed.Path)) continue;
+            var item = WithKnownFolderSize(listed);
             if (newMap.ContainsKey(item.Path)) continue;
             if (_byPath.TryGetValue(item.Path, out var vm))
             {
@@ -752,7 +765,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         bool anyFile = false;
         foreach (var vm in _selected)
         {
-            if (vm.Item is { Kind: StorageItemKind.File, Size: { } size })
+            if (vm.Item is { Kind: not StorageItemKind.Drive, Size: { } size })
             {
                 bytes += size;
                 anyFile = true;
@@ -788,6 +801,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         DeletePermanentlyCommand.NotifyCanExecuteChanged();
         OpenSelectedCommand.NotifyCanExecuteChanged();
         OpenWithCommand.NotifyCanExecuteChanged();
+        UpdateToolCommandStates();
     }
 
     // ------------------------------------------------------------------ open
@@ -981,30 +995,41 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         }
 
         int index = Items.IndexOf(targets[0]);
+        var provider = Provider;
+        var location = Location;
+
+        // Optimistic: the rows disappear right away (one list update, not one per item); the Recycle Bin / disk work
+        // runs in the background. If it fails, a refresh brings back whatever is still there.
+        var gone = targets.ToHashSet();
+        foreach (var t in targets)
+        {
+            _byPath.Remove(t.Path);
+            _deleting.Add(t.Path);
+        }
+        _all = _all.Where(v => !gone.Contains(v)).ToList();
+        _selected.Clear();
+        Items.ReplaceAll(Items.Where(v => !gone.Contains(v)).ToList());
+        if (location is not null) _cache.Invalidate(location);
+        UpdateStatus();
+        if (Items.Count > 0)
+            SelectionRequested?.Invoke(this, [Items[Math.Clamp(index, 0, Items.Count - 1)]]);
+        else
+            FocusListRequested?.Invoke(this, EventArgs.Empty);
+
         _loadingDelay.Start();
         try
         {
-            await Provider.DeleteAsync(targets.Select(t => t.Path).ToList(), permanent, CancellationToken.None);
-
-            foreach (var t in targets)
-            {
-                _byPath.Remove(t.Path);
-                _all.Remove(t);
-                Items.Remove(t);
-            }
-            if (Location is not null) _cache.Invalidate(Location);
-            UpdateStatus();
-
-            if (Items.Count > 0)
-                SelectionRequested?.Invoke(this, [Items[Math.Clamp(index, 0, Items.Count - 1)]]);
-            else
-                FocusListRequested?.Invoke(this, EventArgs.Empty);
+            await provider.DeleteAsync(targets.Select(t => t.Path).ToList(), permanent, CancellationToken.None);
+            foreach (var t in targets) _deleting.Remove(t.Path);
         }
         catch (OperationCanceledException)
         {
+            foreach (var t in targets) _deleting.Remove(t.Path);
+            _ = RefreshSilentlyAsync();
         }
         catch (StorageException ex)
         {
+            foreach (var t in targets) _deleting.Remove(t.Path);
             ShowStorageError(ex);
             _ = RefreshSilentlyAsync();
         }
@@ -1362,6 +1387,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         SortDescending = SortDescending,
         FoldersFirst = FoldersFirst,
         ViewMode = ViewMode,
+        Tabs = Tabs.Count > 1 ? CaptureTabs() : new(),
+        ActiveTab = Math.Max(0, ActiveTabIndex),
     };
 
     public void RestoreState(PaneState state)
@@ -1376,12 +1403,14 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ViewMode));
         OnPropertyChanged(nameof(IsDetailsView));
         OnPropertyChanged(nameof(IsGridView));
+        RestoreTabs(state);
     }
 
     public void Dispose()
     {
         _loadCts?.Cancel();
         _searchCts?.Cancel();
+        _sizeCts?.Cancel();
         _watcher?.Dispose();
     }
 }

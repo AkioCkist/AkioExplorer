@@ -71,6 +71,7 @@ public sealed partial class FilePane : UserControl
             old.AddressEditRequested -= pane.OnAddressEditRequested;
             old.FilterFocusRequested -= pane.OnFilterFocusRequested;
             old.AdvancedSearchRequested -= pane.OnAdvancedSearchRequested;
+            old.DialogRequested -= pane.OnDialogRequested;
             old.PropertyChanged -= pane.OnViewModelPropertyChanged;
         }
 
@@ -82,6 +83,7 @@ public sealed partial class FilePane : UserControl
             vm.AddressEditRequested += pane.OnAddressEditRequested;
             vm.FilterFocusRequested += pane.OnFilterFocusRequested;
             vm.AdvancedSearchRequested += pane.OnAdvancedSearchRequested;
+            vm.DialogRequested += pane.OnDialogRequested;
             vm.PropertyChanged += pane.OnViewModelPropertyChanged;
         }
 
@@ -147,7 +149,16 @@ public sealed partial class FilePane : UserControl
     private void OnSelectionRequested(object? sender, IReadOnlyList<FileItemViewModel> items)
     {
         var list = ActiveList;
-        if (list is null || items.Count == 0) return;
+        if (list is null) return;
+
+        if (items.Count == 0)
+        {
+            _syncingSelection = true;
+            try { list.SelectedItems.Clear(); }
+            finally { _syncingSelection = false; }
+            ViewModel.UpdateSelection([]);
+            return;
+        }
 
         _syncingSelection = true;
         try
@@ -156,10 +167,25 @@ public sealed partial class FilePane : UserControl
             {
                 list.SelectedItem = items[0];
             }
-            else
+            else if (items.Count <= 64)
             {
                 list.SelectedItems.Clear();
                 foreach (var item in items) list.SelectedItems.Add(item);
+            }
+            else
+            {
+                // Big sets (select all, invert, by pattern in a 10k folder): select index ranges, not item by item.
+                var index = new Dictionary<FileItemViewModel, int>(ViewModel.Items.Count);
+                for (int i = 0; i < ViewModel.Items.Count; i++) index[ViewModel.Items[i]] = i;
+                var positions = items.Where(index.ContainsKey).Select(i => index[i]).Order().ToList();
+                list.SelectedItems.Clear();
+                int start = 0;
+                for (int i = 1; i <= positions.Count; i++)
+                {
+                    if (i < positions.Count && positions[i] == positions[i - 1] + 1) continue;
+                    list.SelectRange(new Microsoft.UI.Xaml.Data.ItemIndexRange(positions[start], (uint)(i - start)));
+                    start = i;
+                }
             }
         }
         finally
@@ -209,6 +235,25 @@ public sealed partial class FilePane : UserControl
     {
         ViewModel?.RequestActivation();
         var props = e.GetCurrentPoint(this).Properties;
+        if (props.IsMiddleButtonPressed && ViewModel?.Provider is { } provider)
+        {
+            // Middle-click: folder opens in a background tab (browser convention); on a tab it closes the tab.
+            for (var node = e.OriginalSource as DependencyObject; node is not null && node != this; node = VisualTreeHelper.GetParent(node))
+            {
+                if (node is TabViewItem { DataContext: PaneTab tab })
+                {
+                    ViewModel.CloseTabCommand.Execute(tab);
+                    e.Handled = true;
+                    return;
+                }
+                if (node is FrameworkElement { DataContext: FileItemViewModel { IsContainer: true } folder })
+                {
+                    ViewModel.OpenInNewTab(new StorageLocation(provider.Id, folder.Path), activate: false);
+                    e.Handled = true;
+                    return;
+                }
+            }
+        }
         if (props.IsXButton1Pressed)
         {
             ViewModel?.GoBackCommand.Execute(null);
@@ -259,7 +304,22 @@ public sealed partial class FilePane : UserControl
                 e.Handled = true;
                 break;
             case VirtualKey.F2:
-                ViewModel.RenameCommand.Execute(null);
+                if (ViewModel.SelectedItems.Count > 1) ViewModel.BatchRenameCommand.Execute(null);
+                else ViewModel.RenameCommand.Execute(null);
+                e.Handled = true;
+                break;
+
+            // Total Commander keys: Num + / Num - select / deselect by pattern, Num * inverts.
+            case VirtualKey.Add when !ctrl && !alt:
+                ViewModel.RequestDialog(PaneDialog.SelectByPattern);
+                e.Handled = true;
+                break;
+            case VirtualKey.Subtract when !ctrl && !alt:
+                ViewModel.RequestDialog(PaneDialog.DeselectByPattern);
+                e.Handled = true;
+                break;
+            case VirtualKey.Multiply when !ctrl && !alt:
+                ViewModel.InvertSelectionCommand.Execute(null);
                 e.Handled = true;
                 break;
 
@@ -384,7 +444,26 @@ public sealed partial class FilePane : UserControl
         MenuPinItem.Text = ViewModel.IsSelectionFavorite ? "Unpin from Favorites" : "Pin to Favorites";
         MenuReveal.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
         MenuProperties.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+
+        // Hick's law: only what applies to this selection.
+        MenuOpenTab.Visibility = Show(selected.Any(s => s.IsContainer));
+        MenuRename.Visibility = Show(single);
+        MenuBatchRename.Visibility = Show(ViewModel.BatchRenameCommand.CanExecute(null));
+        MenuBatchRename.Text = single ? "Rename with options…" : $"Rename {selected.Count:N0} items…";
+        MenuDuplicate.Visibility = Show(ViewModel.DuplicateCommand.CanExecute(null));
+        MenuCompress.Visibility = Show(ViewModel.CompressCommand.CanExecute(null));
+        MenuExtractHere.Visibility = Show(ViewModel.ExtractHereCommand.CanExecute(null));
+        MenuExtractFolder.Visibility = Show(ViewModel.ExtractToFolderCommand.CanExecute(null));
+        MenuChecksum.Visibility = Show(ViewModel.ChecksumCommand.CanExecute(null));
+        MenuFolderSize.Visibility = Show(local && selected.Any(s => s.IsContainer && !s.IsDrive));
+        MenuTerminal.Visibility = Show(local && singleFolder);
+        MenuHiddenAttr.Visibility = Show(local);
+        MenuReadOnlyAttr.Visibility = Show(local);
+        MenuHiddenAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.Hidden);
+        MenuReadOnlyAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.ReadOnly);
     }
+
+    private static Visibility Show(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
     private void ConfigureBackgroundMenu()
     {
@@ -403,6 +482,88 @@ public sealed partial class FilePane : UserControl
         MenuPinCurrent.Visibility = hasPath ? Visibility.Visible : Visibility.Collapsed;
         MenuBgExplorer.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
         MenuBgProperties.Visibility = local && hasPath ? Visibility.Visible : Visibility.Collapsed;
+        MenuNewFile.Visibility = Show(ViewModel.IsLocalFolder);
+        MenuBgTerminal.Visibility = Show(ViewModel.IsLocalFolder);
+        MenuBgSizes.Visibility = Show(ViewModel.IsLocalFolder);
+    }
+
+    private void OnSelectByPattern(object sender, RoutedEventArgs e) => ViewModel.RequestDialog(PaneDialog.SelectByPattern);
+
+    private void OnDeselectByPattern(object sender, RoutedEventArgs e) => ViewModel.RequestDialog(PaneDialog.DeselectByPattern);
+
+    // ------------------------------------------------------------------ pane dialogs
+
+    private async void OnDialogRequested(object? sender, PaneDialog dialog)
+    {
+        var dialogs = App.Services.GetRequiredService<DialogService>();
+        var vm = ViewModel;
+        switch (dialog)
+        {
+            case PaneDialog.BatchRename:
+            {
+                // List order drives the counter, so number items as the user sees them.
+                var chosen = vm.SelectedItems.ToHashSet();
+                var items = vm.Items.Where(chosen.Contains).Select(i => i.Item).ToList();
+                if (items.Count == 0) return;
+                var plan = await Views.BatchRenameDialog.ShowAsync(dialogs, items, vm.SiblingNames, vm.FolderName);
+                if (plan is not null) await vm.ApplyBatchRenameAsync(plan);
+                break;
+            }
+            case PaneDialog.SelectByPattern:
+            case PaneDialog.DeselectByPattern:
+            {
+                bool select = dialog == PaneDialog.SelectByPattern;
+                var pattern = await Views.ToolDialogs.PatternAsync(dialogs, select);
+                if (pattern is not null && vm.SelectByPattern(pattern, select) == 0)
+                    vm.ShowMessage($"No items match \"{pattern}\".", isError: false);
+                break;
+            }
+            case PaneDialog.Checksum:
+                if (vm.SelectedItems.Count == 1) await Views.ToolDialogs.ChecksumAsync(dialogs, vm.SelectedItems[0].Path);
+                break;
+        }
+        FocusList();
+    }
+
+    // ------------------------------------------------------------------ tabs
+
+    private async void OnTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TabStrip.SelectedItem is PaneTab tab && tab != ViewModel.ActiveTab)
+        {
+            await ViewModel.SwitchToTabAsync(tab);
+            FocusList();
+        }
+    }
+
+    private void OnTabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
+    {
+        if (args.Item is PaneTab tab) ViewModel.CloseTabCommand.Execute(tab);
+    }
+
+    private void OnAddTabClick(TabView sender, object args)
+    {
+        ViewModel.NewTabCommand.Execute(null);
+        FocusList();
+    }
+
+    private static PaneTab? TabOf(object sender) => (sender as FrameworkElement)?.DataContext as PaneTab;
+
+    private void OnCloseTabMenu(object sender, RoutedEventArgs e)
+    {
+        if (TabOf(sender) is { } tab) ViewModel.CloseTabCommand.Execute(tab);
+    }
+
+    private async void OnCloseOtherTabsMenu(object sender, RoutedEventArgs e)
+    {
+        if (TabOf(sender) is not { } tab) return;
+        await ViewModel.SwitchToTabAsync(tab);
+        ViewModel.CloseOtherTabsCommand.Execute(null);
+    }
+
+    private void OnDuplicateTabMenu(object sender, RoutedEventArgs e)
+    {
+        if (TabOf(sender)?.Location is { } location) ViewModel.OpenInNewTab(location, activate: true);
     }
 
     private void OnMenuViewDetails(object sender, RoutedEventArgs e) => ViewModel.ViewMode = FileViewMode.Details;

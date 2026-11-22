@@ -126,13 +126,10 @@ public sealed class ClipboardService
     /// <summary>Turns external file paths (clipboard, drag & drop from Explorer) into storage items.</summary>
     public async Task<IReadOnlyList<StorageItem>> ResolveLocalAsync(IEnumerable<string> paths)
     {
+        // All lookups at once (order kept): pasting 1,000 files from Explorer shouldn't wait for 1,000 round trips.
         var local = _registry.Get(LocalStorageProvider.ProviderId);
-        var items = new List<StorageItem>();
-        foreach (var path in paths.Where(p => !string.IsNullOrEmpty(p)))
-        {
-            if (await local.GetItemAsync(path, CancellationToken.None) is { } item) items.Add(item);
-        }
-        return items;
+        var found = await Task.WhenAll(paths.Where(p => !string.IsNullOrEmpty(p)).Select(p => local.GetItemAsync(p, CancellationToken.None)));
+        return found.OfType<StorageItem>().ToList();
     }
 
     /// <summary>After a cut is pasted the clipboard is emptied, like File Explorer.</summary>

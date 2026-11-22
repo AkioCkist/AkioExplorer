@@ -21,6 +21,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int _defaultViewIndex;
     [ObservableProperty] private bool _dualPaneOnStartup;
     [ObservableProperty] private bool _showHiddenItems;
+    [ObservableProperty] private bool _showFileExtensions;
+    [ObservableProperty] private bool _autoFolderSizes;
     [ObservableProperty] private bool _restoreLastLocations;
     [ObservableProperty] private int _conflictBehaviorIndex;
     [ObservableProperty] private double _maxSimultaneousOperations;
@@ -37,6 +39,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         _defaultViewIndex = (int)s.DefaultViewMode;
         _dualPaneOnStartup = s.DualPaneOnStartup;
         _showHiddenItems = s.ShowHiddenItems;
+        _showFileExtensions = s.ShowFileExtensions;
+        _autoFolderSizes = s.AutoFolderSizes;
+        // The View menu toggles these too: keep the switches in sync.
+        settings.Changed += (_, _) =>
+        {
+            ShowHiddenItems = settings.Current.ShowHiddenItems;
+            ShowFileExtensions = settings.Current.ShowFileExtensions;
+            AutoFolderSizes = settings.Current.AutoFolderSizes;
+        };
         _restoreLastLocations = s.RestoreLastLocations;
         _conflictBehaviorIndex = (int)s.ConflictBehavior;
         _maxSimultaneousOperations = s.MaxSimultaneousOperations;
@@ -70,8 +81,23 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     partial void OnShowHiddenItemsChanged(bool value)
     {
+        if (_settings.Current.ShowHiddenItems == value) return;
         _settings.Current.ShowHiddenItems = value;
         _settings.NotifyChanged(); // panes re-filter live
+    }
+
+    partial void OnShowFileExtensionsChanged(bool value)
+    {
+        if (_settings.Current.ShowFileExtensions == value) return;
+        _settings.Current.ShowFileExtensions = value;
+        _settings.NotifyChanged();
+    }
+
+    partial void OnAutoFolderSizesChanged(bool value)
+    {
+        if (_settings.Current.AutoFolderSizes == value) return;
+        _settings.Current.AutoFolderSizes = value;
+        _settings.NotifyChanged();
     }
 
     partial void OnRestoreLastLocationsChanged(bool value)

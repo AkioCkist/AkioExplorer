@@ -37,6 +37,12 @@
             <controls:SettingRow Glyph="&#xED1A;" Header="Show hidden items" Description="Hidden files and folders appear dimmed.">
                 <ToggleSwitch IsOn="{x:Bind ViewModel.ShowHiddenItems, Mode=TwoWay}" AutomationProperties.Name="Show hidden items" />
             </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xE8AC;" Header="Show file name extensions" Description="Show .txt, .jpg and so on after file names.">
+                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowFileExtensions, Mode=TwoWay}" AutomationProperties.Name="Show file name extensions" />
+            </controls:SettingRow>
+            <controls:SettingRow Glyph="&#xEDA2;" Header="Calculate folder sizes automatically" Description="Fill the Size column for folders on this PC as you browse. Uses some disk activity on big folders.">
+                <ToggleSwitch IsOn="{x:Bind ViewModel.AutoFolderSizes, Mode=TwoWay}" AutomationProperties.Name="Calculate folder sizes automatically" />
+            </controls:SettingRow>
 
             <TextBlock Text="Cloud accounts" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,20,0,4" />
             <ItemsControl ItemsSource="{x:Bind Cloud.Accounts}">
