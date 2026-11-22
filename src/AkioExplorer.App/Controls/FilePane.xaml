@@ -64,15 +64,12 @@
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
                       Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}">
                     <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform" />
-                    <!-- Video: the default player's icon in the corner (play glyph until that icon loads) -->
-                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,3,3" Padding="2" CornerRadius="4"
-                            Background="#B0000000" Visibility="{x:Bind conv:XamlHelpers.Visible(ShowVideoBadge), Mode=OneWay}"
-                            ToolTipService.ToolTip="Video">
-                        <Grid Width="16" Height="16">
-                            <FontIcon Glyph="&#xE768;" FontSize="11" Foreground="White" Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasIcon), Mode=OneWay}" />
-                            <Image Source="{x:Bind Icon, Mode=OneWay}" Width="16" Height="16" />
-                        </Grid>
-                    </Border>
+                    <!-- Video / music: the default player's icon on the corner, no backdrop (play glyph until that icon loads) -->
+                    <Grid Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2"
+                          Visibility="{x:Bind conv:XamlHelpers.Visible(ShowMediaBadge), Mode=OneWay}">
+                        <FontIcon Glyph="&#xE768;" FontSize="14" Foreground="White" Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasIcon), Mode=OneWay}" />
+                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="20" Height="20" />
+                    </Grid>
                 </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-2,0">
                     <Ellipse Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"

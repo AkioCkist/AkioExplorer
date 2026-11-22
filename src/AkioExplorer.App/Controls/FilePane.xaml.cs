@@ -243,7 +243,7 @@ public sealed partial class FilePane : UserControl
             return;
         }
         vm.EnsureIcon(sender is GridView ? IconSize.Large : IconSize.Small);
-        if (sender is GridView && vm.IsVideo) vm.EnsureIcon(IconSize.Small); // the player's icon for the video badge
+        if (sender is GridView && vm.IsMedia) vm.EnsureIcon(IconSize.Small); // the player's icon for the media badge
         if (sender is GridView) _thumbnails.Request(vm, ViewModel?.Provider);
     }
 

@@ -15,14 +15,16 @@ public sealed partial class FileItemViewModel : ObservableObject
     private bool _largeRequested;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsStarred), nameof(HasLabel), nameof(LabelBrush), nameof(LabelName), nameof(IsVideo), nameof(ShowVideoBadge))]
+    [NotifyPropertyChangedFor(nameof(IsStarred), nameof(HasLabel), nameof(LabelBrush), nameof(LabelName), nameof(IsMedia), nameof(ShowMediaBadge))]
     private StorageItem _item;
 
-    /// <summary>Videos get a badge on their thumbnail (a frame alone looks like a photo).</summary>
-    public bool IsVideo => Item.Kind == StorageItemKind.File && FileCategories.Of(Item) == FileCategory.Video;
+    /// <summary>
+    /// Videos and music get their player's icon on the thumbnail: a video frame or album cover alone looks like a photo.
+    /// </summary>
+    public bool IsMedia => Item.Kind == StorageItemKind.File && FileCategories.Of(Item) is FileCategory.Video or FileCategory.Audio;
 
-    /// <summary>The badge shows on picture thumbnails only; the plain type icon already says "video".</summary>
-    public bool ShowVideoBadge => IsVideo && HasThumbnail;
+    /// <summary>Only on picture thumbnails; the plain type icon already says what the file is.</summary>
+    public bool ShowMediaBadge => IsMedia && HasThumbnail;
 
     /// <summary>Favourite / starred on the cloud service (star after the name).</summary>
     public bool IsStarred => Item.IsStarred;
@@ -68,7 +70,7 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     /// <summary>Picture thumbnail for grid view (photo, video frame…); null shows <see cref="LargeIcon"/>.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasThumbnail), nameof(ShowVideoBadge))]
+    [NotifyPropertyChangedFor(nameof(HasThumbnail), nameof(ShowMediaBadge))]
     private ImageSource? _thumbnail;
 
     public bool HasThumbnail => Thumbnail is not null;
