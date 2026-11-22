@@ -1,4 +1,17 @@
-# Cloud setup (Google Drive, Dropbox, OneDrive)
+# Cloud setup
+
+Supported services, by how they sign in:
+
+| Sign-in | Services |
+|---|---|
+| Browser (OAuth, needs an app registration below) | Google Drive, Dropbox, OneDrive, OneDrive for Business, SharePoint Online, Box |
+| Form in the "Add cloud account" dialog (nothing to register) | MEGA, pCloud, Yandex Disk, Nextcloud, ownCloud, WebDAV, FTP/FTPS, SFTP, Amazon S3, S3-compatible (MinIO, R2, Spaces…), Wasabi, Backblaze B2, Azure Blob Storage |
+| Local folder | iCloud Drive – Apple has no file API; install iCloud for Windows and `%USERPROFILE%\iCloudDrive` appears in the sidebar |
+
+Form-based services are tested with the typed details before anything is saved. Passwords, secret keys and
+sessions go to Windows Credential Manager; server, user name, bucket etc. go to `settings.json`. On reconnect the
+form comes back filled in; leaving a password empty keeps the saved one. MEGA keeps only a session (never the
+password), SFTP pins the server's host key on first connect and refuses a changed key until you reconnect.
 
 AkioExplorer talks to each service with **your own app registration** (a free "client id"). Desktop apps are
 *public clients*: the client id is not a secret, sign-in uses OAuth 2.0 with PKCE in your normal browser, and
@@ -20,7 +33,8 @@ All three use the same format:
 {
   "GoogleDrive": { "ClientId": "xxxx.apps.googleusercontent.com", "ClientSecret": "GOCSPX-…" },
   "Dropbox":     { "ClientId": "your-app-key" },
-  "OneDrive":    { "ClientId": "00000000-0000-0000-0000-000000000000" }
+  "OneDrive":    { "ClientId": "00000000-0000-0000-0000-000000000000" },
+  "Box":         { "ClientId": "…", "ClientSecret": "…" }
 }
 ```
 
@@ -28,7 +42,8 @@ All three use the same format:
 |---|---|
 | Google Drive | `AKIO_GOOGLE_CLIENT_ID`, `AKIO_GOOGLE_CLIENT_SECRET` |
 | Dropbox | `AKIO_DROPBOX_APP_KEY` |
-| OneDrive | `AKIO_ONEDRIVE_CLIENT_ID` |
+| OneDrive, OneDrive for Business, SharePoint | `AKIO_ONEDRIVE_CLIENT_ID` |
+| Box | `AKIO_BOX_CLIENT_ID`, `AKIO_BOX_CLIENT_SECRET` |
 
 ## Google Drive
 
@@ -108,6 +123,17 @@ delete is only available for Dropbox Business, otherwise AkioExplorer deletes no
 
 Work/school tenants may require an administrator to consent to `Files.ReadWrite.All`.
 
+**OneDrive for Business** and **SharePoint Online** use this same registration. SharePoint additionally asks for
+`Sites.Read.All` (add it under API permissions) to turn the site address into a document library.
+
+## Box
+
+1. <https://app.box.com/developers/console> → **Create Platform App** → **User Authentication (OAuth 2.0)**.
+2. Configuration → Redirect URI: `http://localhost:53683/` (exact, fixed port).
+3. Application scopes: **Read and write all files and folders stored in Box**.
+4. Copy **Client ID** and **Client Secret** into `Box.ClientId` / `Box.ClientSecret`. Box requires the secret on
+   token requests; for a desktop app it is not really confidential, treat it like Google's.
+
 ## Where credentials are stored
 
 | What | Where |
@@ -126,4 +152,12 @@ deletes the Credential Manager entry.
 - Dropbox: official `Dropbox.Api` SDK (it refreshes access tokens itself).
 - OneDrive: Microsoft Graph v1.0 **REST API** called directly with `HttpClient` (the official API). The Graph SDK
   was not used because it adds ~40 MB of assemblies and its own HTTP pipeline for a handful of endpoints.
+- Box: REST v2.0, id-based with a path→id cache; uploads over 50 MB use chunked upload sessions (SHA-1 per part).
+- WebDAV (also Nextcloud, ownCloud, pCloud, Yandex): PROPFIND parsed as a stream, Basic auth sent up front,
+  Digest/NTLM servers switch to challenge auth, Range downloads for the segmented downloader.
+- S3 family: hand-written SigV4 (checked against the AWS documentation vectors), multipart uploads with 4 parts in
+  flight, pre-signed URLs for segmented downloads, AWS buckets in other regions followed automatically.
+- Azure Blob: Shared Key auth, parallel block uploads, SAS URLs for segmented downloads.
+- FTP/FTPS: FluentFTP with a pool of 4 control connections. SFTP: SSH.NET, pipelined transfers.
+- MEGA: MegaApiClient (end-to-end encryption on this PC); the node tree is cached for a few seconds.
 - All HTTP calls share one pooled connection handler with retries for 429/5xx honouring `Retry-After`.

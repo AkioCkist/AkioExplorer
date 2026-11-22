@@ -21,7 +21,7 @@ public sealed class GoogleDriveConnector(CloudAppsConfig config, ICredentialStor
     protected override OAuthClient CreateOAuthClient() => new(Endpoints, new OAuthApp(
         Registration.ClientId!,
         Registration.ClientSecret,
-        Scopes: ["https://www.googleapis.com/auth/drive", "openid", "email"],
+        Scopes: ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/drive.activity.readonly", "openid", "email"],
         RedirectHost: "127.0.0.1",
         // offline + consent guarantees a refresh token even if the user granted access before.
         ExtraAuthorizeParameters: new Dictionary<string, string> { ["access_type"] = "offline", ["prompt"] = "consent select_account" }), Http);

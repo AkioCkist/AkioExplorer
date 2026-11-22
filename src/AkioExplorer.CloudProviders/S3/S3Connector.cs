@@ -119,5 +119,13 @@ public static class S3Services
             s => ($"https://s3.{Get(s, "region", "us-west-004")}.backblazeb2.com", Get(s, "region", "us-west-004")),
             "Backblaze B2 cloud storage", "b2", AccessKeyLabel: "Key ID", SecretKeyLabel: "Application key"),
 
+        // MEGA's object storage. Keys: MEGA web app › Object storage › Keys; the region is in the endpoint it shows
+        // (s3.<region>.s4.mega.io).
+        new(CloudProviderType.MegaS4, "MEGA S4",
+            [Region("eu-central-1", ["eu-central-1", "eu-central-2", "ca-central-1", "ca-west-1"],
+                "The region in the endpoint MEGA shows under Object storage (s3.<region>.s4.mega.io).")],
+            s => ($"https://s3.{Get(s, "region", "eu-central-1")}.s4.mega.io", Get(s, "region", "eu-central-1")),
+            "MEGA object storage (S4)", "mega s4 object storage", PathStyle: true),
+
     ];
 }

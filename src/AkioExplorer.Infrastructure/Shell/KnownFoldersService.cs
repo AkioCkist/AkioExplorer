@@ -25,8 +25,14 @@ public sealed class KnownFoldersService : IKnownFoldersService
         Add("Pictures", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "");
         Add("Music", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "");
         Add("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "");
+
+        // iCloud has no public file API; iCloud for Windows syncs iCloud Drive into this folder (files on demand).
+        Add("iCloud Drive", ICloudDrivePath, "");
         return list;
     }
+
+    /// <summary>Where iCloud for Windows keeps iCloud Drive.</summary>
+    public static string ICloudDrivePath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "iCloudDrive");
 
     private static string? GetDownloadsPath()
     {

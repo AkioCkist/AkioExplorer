@@ -15,8 +15,6 @@ public enum CloudProviderType
     Mega,
     PCloud,
     Yandex,
-    MediaFire,
-    ICloud,
 
     // Self-hosted and servers
     WebDav,
@@ -31,6 +29,7 @@ public enum CloudProviderType
     Wasabi,
     Backblaze,
     AzureBlob,
+    MegaS4,
 }
 
 /// <summary>How the add-account dialog groups services.</summary>
@@ -86,7 +85,13 @@ public sealed class CloudAccount
     };
 }
 
-public sealed record StorageQuota(long? Used, long? Total);
+public sealed record StorageQuota(long? Used, long? Total)
+{
+    /// <summary>Bandwidth used in the current period, for services that limit transfers (MEGA).</summary>
+    public long? TransferUsed { get; init; }
+
+    public long? TransferTotal { get; init; }
+}
 
 /// <summary>A storage provider backed by a cloud account.</summary>
 public interface ICloudStorageProvider : IStorageProvider

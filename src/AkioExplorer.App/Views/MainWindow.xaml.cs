@@ -56,6 +56,7 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumHeight = 420;
         }
 
+        AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
         _theme.Attach(RootGrid, AppWindow);
         RestorePlacement();
         App.Services.GetRequiredService<AkioExplorer.Infrastructure.Shell.ShellMenuService>().OwnerWindow = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -91,6 +92,7 @@ public sealed partial class MainWindow : Window
         foreach (var pane in new[] { ViewModel.LeftPane, ViewModel.RightPane })
         {
             pane.AuthenticationExpired += (_, providerId) => _cloud.MarkNeedsReconnect(providerId);
+            pane.TrashChanged += (_, _) => _ = _cloud.LoadQuotasAsync(); // the trash counts toward the quota
             pane.ReconnectRequested += async (sender, providerId) => await ReconnectAsync(providerId, (FilePaneViewModel)sender!);
         }
         BuildSidebar();
@@ -570,10 +572,60 @@ public sealed partial class MainWindow : Window
         disconnect.Click += async (_, _) => await DisconnectAsync(account);
         menu.Items.Add(open);
         menu.Items.Add(rename);
+        var recent = new MenuFlyoutItem { Text = "Recent files", Icon = new FontIcon { Glyph = "" } };
+        recent.Click += async (_, _) => await OnAccountPaneAsync(account, p => p.ShowRecentFilesAsync());
+        var media = new MenuFlyoutItem { Text = "Photos & videos", Icon = new FontIcon { Glyph = "" } };
+        media.Click += async (_, _) => await OnAccountPaneAsync(account, p => p.ShowMediaAsync());
+        menu.Items.Add(new MenuFlyoutSeparator());
+        var starred = new MenuFlyoutItem { Text = "Starred", Icon = new FontIcon { Glyph = "\uE734" } };
+        starred.Click += async (_, _) => await OnAccountPaneAsync(account, p => p.ShowStarredAsync());
+        var largest = new MenuFlyoutItem { Text = "Largest files", Icon = new FontIcon { Glyph = "\uEDA2" } };
+        largest.Click += async (_, _) => await OnAccountPaneAsync(account, p => p.ShowLargestFilesAsync());
+        menu.Items.Add(recent);
+        menu.Items.Add(media);
+        if ((_cloud.ProviderOf(account.Account)?.Capabilities & StorageCapabilities.SearchStarred) != 0) menu.Items.Add(starred);
+        menu.Items.Add(largest);
+        if (_cloud.ProviderOf(account.Account) is IWebViewProvider)
+        {
+            var web = new MenuFlyoutItem { Text = "Open in browser", Icon = new FontIcon { Glyph = "\uE774" } };
+            web.Click += async (_, _) => await OnAccountPaneAsync(account, p => { p.OpenInBrowserCommand.Execute(null); return Task.CompletedTask; });
+            menu.Items.Add(web);
+        }
+        if (_cloud.ProviderOf(account.Account) is IPublicLinkProvider)
+        {
+            var link = new MenuFlyoutItem { Text = "Open a link…", Icon = new FontIcon { Glyph = "" } };
+            link.Click += async (_, _) => await OnAccountPaneAsync(account, p => { p.OpenPublicLinkCommand.Execute(null); return Task.CompletedTask; });
+            menu.Items.Add(link);
+        }
+        if (_cloud.ProviderOf(account.Account) is ITrashProvider trash)
+        {
+            var empty = new MenuFlyoutItem { Text = $"{trash.TrashName}…", Icon = new FontIcon { Glyph = "" } };
+            empty.Click += async (_, _) => await OpenTrashAsync(account);
+            menu.Items.Add(empty);
+        }
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(reconnect);
         menu.Items.Add(disconnect);
         return menu;
+    }
+
+    /// <summary>From the account's sidebar menu: shows the account in the active pane, then runs <paramref name="action"/> there.</summary>
+    private async Task OnAccountPaneAsync(CloudAccountItem account, Func<FilePaneViewModel, Task> action)
+    {
+        ShowExplorer();
+        var pane = ViewModel.ActivePane;
+        if (pane.Location?.ProviderId != account.Account.ProviderId) await ViewModel.NavigateActiveAsync(_cloud.RootOf(account.Account));
+        await action(pane);
+        ViewFor(pane).FocusList();
+    }
+
+    /// <summary>From the account's sidebar menu: shows the account in the active pane, then its trash.</summary>
+    private async Task OpenTrashAsync(CloudAccountItem account)
+    {
+        ShowExplorer();
+        var pane = ViewModel.ActivePane;
+        if (pane.Location?.ProviderId != account.Account.ProviderId) await ViewModel.NavigateActiveAsync(_cloud.RootOf(account.Account));
+        if (pane.OpenTrashCommand.CanExecute(null)) pane.OpenTrashCommand.Execute(null);
     }
 
     private async Task AddCloudAccountAsync()
@@ -800,6 +852,26 @@ public sealed partial class MainWindow : Window
         Rc("Duplicate", "File", null, "", p => p.DuplicateCommand, "copy make a copy");
         Rc("Delete to Recycle Bin", "File", "Del", "", p => p.DeleteCommand, "remove trash");
         Rc("Delete permanently", "File", "Shift+Del", "", p => p.DeletePermanentlyCommand, "remove erase");
+        Rc("Trash (Recycle Bin / Rubbish bin): restore or empty…", "File", null, "", p => p.OpenTrashCommand, "rubbish bin recycle restore recover undelete empty clear purge");
+        // Cloud
+        Rc("Copy link (share)", "Cloud", null, "", p => p.CopyLinkCommand, "share public link url mega drive");
+        Rc("Turn off link…", "Cloud", null, "", p => p.RemoveLinkCommand, "unshare stop sharing link");
+        Rc("Add to / remove from favourites", "Cloud", null, "", p => p.ToggleStarCommand, "star starred favourite favorite");
+        Rc("Hide / unhide (cloud)", "Cloud", null, "", p => p.ToggleCloudHiddenCommand, "sensitive hide mega");
+        Rc("Versions…", "Cloud", null, "", p => p.ShowVersionsCommand, "history previous version restore revisions");
+        Rc("Open a link someone shared…", "Cloud", null, "", p => p.OpenPublicLinkCommand, "import mega link save to my drive");
+        Rc("Open in browser", "Cloud", null, "\uE774", p => p.OpenInBrowserCommand, "web google docs online drive.google.com");
+        Rc("Share…", "Cloud", null, "\uE72D", p => p.ShareCommand, "share people email permissions access owner");
+        Rc("Comments…", "Cloud", null, "\uE90A", p => p.ShowCommentsCommand, "comment reply resolve discussion");
+        Rc("Activity…", "Cloud", null, "\uE7C4", p => p.ShowActivityCommand, "history who changed edited");
+        Rc("Description…", "Cloud", null, "\uE70B", p => p.EditDescriptionCommand, "notes details info");
+        Rc("Add shortcut to My Drive", "Cloud", null, "\uE71B", p => p.AddShortcutCommand, "shortcut link alias");
+        Rc("Make a Google copy (convert)", "Cloud", null, "\uE8AB", p => p.ConvertToOnlineCommand, "convert docx xlsx pptx google docs sheets slides");
+        Rc("Lock / unlock editing", "Cloud", null, "\uE72E", p => p.ToggleLockCommand, "read-only restrict content");
+        Cmd("Starred / favourites", "Cloud", null, "\uE734", () => P().Provider is not null, () => _ = P().ShowStarredAsync(), "star starred favourites");
+        Cmd("Largest files (storage)", "Cloud", null, "\uEDA2", () => P().Provider is not null, () => _ = P().ShowLargestFilesAsync(), "storage space size big quota clean up");
+        Cmd("Recent files (last 30 days)", "Cloud", null, "", () => P().Provider is not null, () => _ = P().ShowRecentFilesAsync(), "recents recently changed added");
+        Cmd("Photos & videos", "Cloud", null, "", () => P().Provider is not null, () => _ = P().ShowMediaAsync(), "media timeline pictures gallery");
         Rc("Compress to ZIP", "File", null, "", p => p.CompressCommand, "zip archive pack");
         Rc("Extract here", "File", null, "", p => p.ExtractHereCommand, "unzip archive unpack");
         Rc("Extract to folder", "File", null, "", p => p.ExtractToFolderCommand, "unzip archive unpack");

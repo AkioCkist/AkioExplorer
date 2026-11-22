@@ -52,12 +52,14 @@ public sealed partial class CloudAccountsViewModel : ObservableObject
     /// <summary>Raised when an account needs the user to sign in again (sidebar shows a warning).</summary>
     public event EventHandler? Changed;
 
-    public Task<CloudAccount> AddAsync(CloudProviderType type, CancellationToken cancellationToken) =>
-        _service.AddAccountAsync(type, cancellationToken);
+    public Task<CloudAccount> AddAsync(CloudProviderType type, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken) =>
+        _service.AddAccountAsync(type, values, cancellationToken);
 
-    public async Task ReconnectAsync(Guid accountId, CancellationToken cancellationToken)
+    public CloudServiceItem? ServiceOf(CloudProviderType type) => Services.FirstOrDefault(s => s.Type == type);
+
+    public async Task ReconnectAsync(Guid accountId, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken)
     {
-        await _service.ReconnectAsync(accountId, cancellationToken);
+        await _service.ReconnectAsync(accountId, values, cancellationToken);
         if (Find(accountId) is { } item) item.NeedsReconnect = false;
     }
 
@@ -76,6 +78,8 @@ public sealed partial class CloudAccountsViewModel : ObservableObject
     public CloudAccountItem? Find(Guid accountId) => Accounts.FirstOrDefault(a => a.Account.Id == accountId);
 
     public CloudAccountItem? FindByProvider(string providerId) => Accounts.FirstOrDefault(a => a.Account.ProviderId == providerId);
+
+    public Core.Abstractions.IStorageProvider? ProviderOf(CloudAccount account) => _service.GetProvider(account.Id);
 
     public StorageLocation RootOf(CloudAccount account) =>
         new(account.ProviderId, _service.GetProvider(account.Id)?.RootPath ?? string.Empty);
@@ -105,24 +109,34 @@ public sealed partial class CloudAccountsViewModel : ObservableObject
         var reconnect = Accounts.Where(a => a.NeedsReconnect).Select(a => a.Account.Id).ToHashSet();
         Accounts.Clear();
         foreach (var account in _service.Accounts)
-            Accounts.Add(new CloudAccountItem(account) { NeedsReconnect = reconnect.Contains(account.Id) });
+            Accounts.Add(new CloudAccountItem(account, _service.GetConnector(account.Type)?.Name ?? account.Type.ToString())
+            {
+                NeedsReconnect = reconnect.Contains(account.Id),
+            });
         HasAccounts = Accounts.Count > 0;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>Real logos for the first three services; a coloured badge (PNG) for the rest.</summary>
     public static string IconUri(CloudProviderType type) => type switch
     {
-        CloudProviderType.GoogleDrive => "ms-appx:///Assets/Providers/googledrive.svg",
-        CloudProviderType.Dropbox => "ms-appx:///Assets/Providers/dropbox.svg",
-        _ => "ms-appx:///Assets/Providers/onedrive.svg",
+        CloudProviderType.GoogleDrive or CloudProviderType.Dropbox or CloudProviderType.OneDrive =>
+            $"ms-appx:///Assets/Providers/{type.ToString().ToLowerInvariant()}.svg",
+        _ => $"ms-appx:///Assets/Providers/{type.ToString().ToLowerInvariant()}.png",
     };
+
+    public static Microsoft.UI.Xaml.Media.ImageSource IconSource(string uri) =>
+        uri.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)
+            ? new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource(new Uri(uri))
+            : new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(uri));
 }
 
 public sealed partial class CloudAccountItem : ObservableObject
 {
-    public CloudAccountItem(CloudAccount account)
+    public CloudAccountItem(CloudAccount account, string serviceName)
     {
         Account = account;
+        ServiceName = serviceName;
     }
 
     public CloudAccount Account { get; }
@@ -131,14 +145,11 @@ public sealed partial class CloudAccountItem : ObservableObject
 
     public string Subtitle => Account.Email ?? Account.UserName ?? ServiceName;
 
-    public string ServiceName => Account.Type switch
-    {
-        CloudProviderType.GoogleDrive => "Google Drive",
-        CloudProviderType.Dropbox => "Dropbox",
-        _ => "OneDrive",
-    };
+    public string ServiceName { get; }
 
     public string IconUri => CloudAccountsViewModel.IconUri(Account.Type);
+
+    public Microsoft.UI.Xaml.Media.ImageSource Icon => CloudAccountsViewModel.IconSource(IconUri);
 
     [ObservableProperty] private bool _needsReconnect;
     [ObservableProperty] private string _quotaText = string.Empty;
@@ -165,6 +176,10 @@ public sealed partial class CloudAccountItem : ObservableObject
             QuotaText = $"{Formatting.FormatSize(used)} used";
             HasQuota = false;
         }
+
+        // MEGA paid plans: bandwidth limit for the period.
+        if (quota.TransferTotal is { } transferTotal && transferTotal > 0)
+            QuotaText += $" · transfer {Formatting.FormatSize(quota.TransferUsed ?? 0)} of {Formatting.FormatSize(transferTotal)}";
     }
 }
 
@@ -178,5 +193,30 @@ public sealed class CloudServiceItem(ICloudConnector connector)
 
     public string SetupHint => connector.SetupHint;
 
+    public CloudCategory Category => connector.Category;
+
+    public string Description => connector.Description;
+
+    public IReadOnlyList<CloudField> Fields => connector.Fields;
+
+    public bool UsesBrowserSignIn => connector.UsesBrowserSignIn;
+
     public string IconUri => CloudAccountsViewModel.IconUri(connector.Type);
+
+    /// <summary>Name, description and keywords contain every word of <paramref name="query"/>.</summary>
+    public bool Matches(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return true;
+        string haystack = $"{Name} {Description} {connector.Keywords} {CategoryName(Category)}";
+        return query.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(word => haystack.Contains(word, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static string CategoryName(CloudCategory category) => category switch
+    {
+        CloudCategory.Popular => "Popular",
+        CloudCategory.Business => "Work and business",
+        CloudCategory.Servers => "Your own server or NAS",
+        CloudCategory.ObjectStorage => "Object storage",
+        _ => category.ToString(),
+    };
 }

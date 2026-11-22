@@ -866,6 +866,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         RenameCommand.NotifyCanExecuteChanged();
         DeleteCommand.NotifyCanExecuteChanged();
         DeletePermanentlyCommand.NotifyCanExecuteChanged();
+        OpenTrashCommand.NotifyCanExecuteChanged();
+        UpdateCloudCommandStates();
+        OnPropertyChanged(nameof(TrashLabel));
         OpenSelectedCommand.NotifyCanExecuteChanged();
         OpenWithCommand.NotifyCanExecuteChanged();
         UpdateToolCommandStates();
@@ -898,6 +901,13 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Google Docs, Sheets, Forms…: they live in the browser (downloading would only give an export).
+        if (Provider is IWebViewProvider web && web.OpensInBrowser(vm.Item))
+        {
+            await OpenInBrowserAsync(vm.Item);
+            return;
+        }
+
         if ((Provider.Capabilities & StorageCapabilities.OpenWithShell) == 0)
         {
             if (Provider is IFileContentProvider) OpenRemoteRequested?.Invoke(this, vm.Item);
@@ -927,7 +937,10 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     private bool Supports(StorageCapabilities capability) => Provider is not null && (Provider.Capabilities & capability) != 0;
 
-    private bool IsAtRoot => Location is null || Provider is null || Location.Path == Provider.RootPath;
+    /// <summary>At a root that only lists drives/buckets (This PC, an S3 account): nothing can be created or deleted there.
+    /// A cloud drive's root is an ordinary folder.</summary>
+    private bool IsAtRoot => Location is null || Provider is null ||
+        Location.Path == Provider.RootPath && Supports(StorageCapabilities.VirtualRoot);
 
     private bool CanCreateFolder() => Supports(StorageCapabilities.CreateFolder) && !IsAtRoot && !IsSearchMode;
 
@@ -1044,6 +1057,26 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     [RelayCommand(CanExecute = nameof(CanDelete))]
     private Task DeletePermanentlyAsync() => DeleteSelectionAsync(permanent: true);
+
+    /// <summary>"Rubbish bin…" / "Trash…" / "Recycle Bin…" for the current service.</summary>
+    public string TrashLabel => Provider is ITrashProvider trash ? $"{trash.TrashName}…" : "Trash…";
+
+    private bool CanOpenTrash() => Provider is ITrashProvider;
+
+    /// <summary>Shows what's in the trash (restore, delete for good, empty); the view builds the dialog.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenTrash))]
+    private void OpenTrash() => RequestDialog(PaneDialog.Trash);
+
+    /// <summary>After the trash dialog restored or deleted something: restored items may belong in this folder, and
+    /// storage usage changed.</summary>
+    public void OnTrashChanged()
+    {
+        _ = RefreshSilentlyAsync();
+        TrashChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Raised after items were restored from or deleted in the trash (storage usage changed).</summary>
+    public event EventHandler? TrashChanged;
 
     private async Task DeleteSelectionAsync(bool permanent)
     {

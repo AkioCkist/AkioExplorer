@@ -26,6 +26,7 @@ public static class SearchLabels
         FileCategory.Video => "Videos",
         FileCategory.Audio => "Audio",
         FileCategory.Archive => "Archives (zip)",
+        FileCategory.Media => "Photos & videos",
         _ => "Code",
     };
 

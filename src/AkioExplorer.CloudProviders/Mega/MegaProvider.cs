@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using AkioExplorer.CloudProviders.Forms;
+using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Models;
 using CG.Web.MegaApiClient;
@@ -11,7 +12,7 @@ namespace AkioExplorer.CloudProviders.Mega;
 /// the whole node tree in one request, so the tree is cached briefly and paths are looked up in it. After the
 /// first sign-in only a session (id + master key) is kept, never the password, and 2FA isn't asked again.
 /// </summary>
-public sealed class MegaProvider : RemotePathProvider, IDisposable
+public sealed partial class MegaProvider : RemotePathProvider, ITrashProvider, IDisposable
 {
     private static readonly TimeSpan TreeLifetime = TimeSpan.FromSeconds(30);
 
@@ -19,30 +20,42 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
     private readonly string? _password;
     private readonly string? _mfa;
     private readonly MegaApiClient.LogonSessionToken? _session;
-    private readonly MegaApiClient _client = new();
+    // Fast hashcash and parallel upload parts: see MegaWebClient / MegaUploadPipeline.
+    private readonly MegaApiClient _client = new(new Options(chunksPackSize: MegaUploadPipeline.PackSize), new MegaWebClient());
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IThumbnailGenerator? _thumbnails;
     private Tree? _tree;
+    private MegaRawApi? _raw;
 
-    public MegaProvider(CloudAccount account, string email, string? password, string? mfa, MegaApiClient.LogonSessionToken? session)
+    public MegaProvider(CloudAccount account, string email, string? password, string? mfa, MegaApiClient.LogonSessionToken? session,
+        IThumbnailGenerator? thumbnails = null)
         : base(account, CloudProviderType.Mega, "MEGA")
     {
         _email = email;
         _password = password;
         _mfa = mfa;
         _session = session;
+        _thumbnails = thumbnails;
     }
 
     /// <summary>The session after a password sign-in (what the connector stores).</summary>
     public MegaApiClient.LogonSessionToken? Session { get; private set; }
 
-    public override StorageCapabilities Capabilities => base.Capabilities | StorageCapabilities.RecycleBin;
+    public override StorageCapabilities Capabilities => base.Capabilities | StorageCapabilities.RecycleBin | StorageCapabilities.ServerSideCopy;
 
-    private sealed class Tree(Dictionary<string, INode> byPath, Dictionary<string, List<INode>> children, INode root, DateTimeOffset loaded)
+    private sealed class Tree(Dictionary<string, INode> byPath, Dictionary<string, List<INode>> children, INode root, DateTimeOffset loaded,
+        Dictionary<string, MegaRawNode> raw)
     {
         public Dictionary<string, INode> ByPath { get; } = byPath;
         public Dictionary<string, List<INode>> Children { get; } = children; // by parent node id
         public INode Root { get; } = root;
         public DateTimeOffset Loaded { get; } = loaded;
+
+        /// <summary>Every node with decrypted key and full attributes (favourite, label, thumbnails…), by handle.</summary>
+        public Dictionary<string, MegaRawNode> Raw { get; } = raw;
+
+        /// <summary>Handle → path, for nodes in the Cloud drive.</summary>
+        public Dictionary<string, string> PathOf { get; } = byPath.GroupBy(p => p.Value.Id).ToDictionary(g => g.Key, g => g.First().Key);
     }
 
     private async Task EnsureLoggedInAsync()
@@ -85,7 +98,19 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
         if (!fresh && _tree is { } cached && DateTimeOffset.UtcNow - cached.Loaded < TreeLifetime) return cached;
         return await RunAsync(string.Empty, async () =>
         {
+            // MegaApiClient's nodes drive its own operations; the raw list (fetched at the same time) adds what it
+            // doesn't expose. A failing raw fetch only costs those extras.
+            var rawTask = RawApi().FetchNodesAsync(cancellationToken);
             var nodes = (await _client.GetNodesAsync().ConfigureAwait(false)).ToList();
+            Dictionary<string, MegaRawNode> raw;
+            try
+            {
+                raw = (await rawTask.ConfigureAwait(false)).GroupBy(n => n.Handle).ToDictionary(g => g.Key, g => g.First());
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                raw = new();
+            }
             var root = nodes.First(n => n.Type == NodeType.Root);
             var children = nodes.Where(n => n.ParentId is not null).GroupBy(n => n.ParentId).ToDictionary(g => g.Key, g => g.ToList());
             var byPath = new Dictionary<string, INode>(StringComparer.OrdinalIgnoreCase) { [string.Empty] = root };
@@ -102,7 +127,7 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
                     if (child.Type == NodeType.Directory) pending.Enqueue((child, childPath));
                 }
             }
-            return _tree = new Tree(byPath, children, root, DateTimeOffset.UtcNow);
+            return _tree = new Tree(byPath, children, root, DateTimeOffset.UtcNow, raw);
         }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -117,15 +142,22 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
         return tree.ByPath.TryGetValue(path, out node) ? node : throw NotFound(path);
     }
 
-    private static StorageItem ToItem(INode node, string path) => new()
+    private StorageItem ToItem(INode node, string path)
     {
-        Name = node.Name,
-        Path = path,
-        Kind = node.Type == NodeType.File ? StorageItemKind.File : StorageItemKind.Folder,
-        Size = node.Type == NodeType.File ? node.Size : null,
-        Modified = node.ModificationDate is { } m ? new DateTimeOffset(m).ToLocalTime() : node.CreationDate is { } c ? new DateTimeOffset(c).ToLocalTime() : null,
-        Created = node.CreationDate is { } created ? new DateTimeOffset(created).ToLocalTime() : null,
-    };
+        var raw = _tree?.Raw.GetValueOrDefault(node.Id);
+        return new()
+        {
+            Name = node.Name,
+            Path = path,
+            Kind = node.Type == NodeType.File ? StorageItemKind.File : StorageItemKind.Folder,
+            Size = node.Type == NodeType.File ? node.Size : null,
+            Modified = node.ModificationDate is { } m ? new DateTimeOffset(m).ToLocalTime() : node.CreationDate is { } c ? new DateTimeOffset(c).ToLocalTime() : null,
+            Created = node.CreationDate is { } created ? new DateTimeOffset(created).ToLocalTime() : null,
+            IsStarred = raw?.IsFavourite == true,
+            Label = raw is null ? ItemLabel.None : (ItemLabel)Math.Clamp(raw.Label, 0, 7),
+            Attributes = raw?.IsSensitive == true ? StorageItemAttributes.Hidden : StorageItemAttributes.None, // MEGA "Hide"
+        };
+    }
 
     // ------------------------------------------------------------------ listing
 
@@ -167,6 +199,7 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
             string path = Normalize(raw);
             if (path.Length == 0) throw RootChange("deleted");
             var node = await NodeAsync(path, cancellationToken).ConfigureAwait(false);
+            if (!permanent) await RememberOriginAsync(node, cancellationToken).ConfigureAwait(false); // like MEGA's web app: "rr"
             await RunAsync(path, async () => { await _client.DeleteAsync(node, moveToTrash: !permanent).ConfigureAwait(false); return 0; }, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -193,7 +226,8 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
     public override async Task<StorageQuota?> GetQuotaAsync(CancellationToken cancellationToken)
     {
         var info = await RunAsync(string.Empty, () => _client.GetAccountInformationAsync(), cancellationToken).ConfigureAwait(false);
-        return new StorageQuota(info.UsedQuota, info.TotalQuota > 0 ? info.TotalQuota : null);
+        var quota = new StorageQuota(info.UsedQuota, info.TotalQuota > 0 ? info.TotalQuota : null);
+        return await WithTransferQuotaAsync(quota, cancellationToken).ConfigureAwait(false);
     }
 
     // ------------------------------------------------------------------ content
@@ -204,9 +238,18 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
         await EnsureSignedInAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Several connections, AES-CTR decrypted per part; MegaApiClient's single stream is the fallback when the
+            // raw node list (with the key) isn't available.
+            if (_tree?.Raw.GetValueOrDefault(node.Id) is { Key: { Length: 32 } key })
+            {
+                var api = RawApi();
+                var (url, size) = await api.DownloadUrlAsync(node.Id, cancellationToken).ConfigureAwait(false);
+                return new MegaDownloadStream(MegaRawApi.Client, url, size, key,
+                    async ct => (await api.DownloadUrlAsync(node.Id, ct).ConfigureAwait(false)).Url, cancellationToken);
+            }
             return await _client.DownloadAsync(node, null, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not StorageException)
         {
             throw Map(ex, file.Path);
         }
@@ -222,18 +265,74 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
 
         await EnsureSignedInAsync(cancellationToken).ConfigureAwait(false);
         INode uploaded;
+        MegaUploadPipeline? pipeline = null;
+        KnownLengthStream? copy = null;
         try
         {
-            // MEGA keeps both files when names clash: upload first, then remove the old one.
-            uploaded = await _client.UploadAsync(content, name, parent, null, DateTime.Now, cancellationToken).ConfigureAwait(false);
+            // MegaApiClient reads Stream.Length up front. Network sources (cloud → MEGA) don't have one: report the
+            // size the transfer engine already knows, or spool to a temp file when even that is unknown.
+            Stream source;
+            if (content.CanSeek)
+            {
+                source = content;
+            }
+            else if (length >= 0)
+            {
+                // Pictures from another cloud: keep a copy of the bytes for the thumbnail (MEGA doesn't make one).
+                bool keep = _thumbnails is not null && length <= MaxThumbnailSource && ThumbnailWorthy(name);
+                source = new KnownLengthStream(content, length, keep);
+            }
+            else
+            {
+                string spool = Path.Combine(Path.GetTempPath(), "AkioExplorer-mega-" + Guid.NewGuid().ToString("N") + ".tmp");
+                var file = new FileStream(spool, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 1 << 20, FileOptions.DeleteOnClose | FileOptions.Asynchronous);
+                try
+                {
+                    await content.CopyToAsync(file, 1 << 20, cancellationToken).ConfigureAwait(false);
+                    file.Position = 0;
+                }
+                catch
+                {
+                    await file.DisposeAsync().ConfigureAwait(false); // DeleteOnClose removes the partial copy
+                    throw;
+                }
+                source = file;
+            }
+
+            copy = source as KnownLengthStream;
+            await using (source == content ? null : source)
+            {
+                // The file fingerprint (CRC samples + date) makes MegaApiClient rewind the stream after the upload;
+                // a network stream can't, so it goes without one (MEGA then shows the upload time).
+                DateTime? modified = source.CanSeek ? DateTime.Now : null;
+                pipeline = new MegaUploadPipeline(name, source.Length, content as Core.Transfers.IUploadProgressSink, cancellationToken);
+                MegaUploadPipeline.Current.Value = pipeline; // flows into MegaApiClient's worker task
+                // MEGA keeps both files when names clash: upload first, then remove the old one.
+                uploaded = await _client.UploadAsync(source, name, parent, null, modified, pipeline.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (Exception) when (pipeline?.Failure is { } failure)
+        {
+            // A part failed for good: MegaApiClient only saw the pipeline stop. Report the real reason.
+            throw Map(failure, path);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             throw Map(ex, path);
         }
+        finally
+        {
+            MegaUploadPipeline.Current.Value = null;
+            pipeline?.Dispose();
+        }
         if (existing is not null)
             await RunAsync(path, async () => { await _client.DeleteAsync(existing, moveToTrash: true).ConfigureAwait(false); return 0; }, cancellationToken)
                 .ConfigureAwait(false);
+        await AddThumbnailsAsync(uploaded, name, content, copy?.Copy, cancellationToken).ConfigureAwait(false);
         Invalidate();
         return ToItem(uploaded, path);
     }
@@ -244,21 +343,27 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
 
     private StorageException Map(Exception ex, string path) => ex switch
     {
-        ApiException { ApiResultCode: ApiResultCode.TwoFactorAuthenticationError } => new StorageException(StorageErrorKind.AuthenticationRequired,
-            "MEGA needs the 6-digit code from your authenticator app. Enter it and try again."),
-        ApiException { ApiResultCode: ApiResultCode.BadSessionId or ApiResultCode.ResourceNotExists } when path.Length == 0 => SignInFailed(),
-        ApiException { ApiResultCode: ApiResultCode.ResourceNotExists } => NotFound(path),
-        ApiException { ApiResultCode: ApiResultCode.AccessDenied } => Denied(path),
-        ApiException { ApiResultCode: ApiResultCode.ResourceAlreadyExists } => Exists(path),
-        ApiException { ApiResultCode: ApiResultCode.QuotaExceeded } => new StorageException(StorageErrorKind.Throttled,
-            "MEGA's transfer quota is used up for now. MEGA lifts it after a few hours (or with a paid plan)."),
-        ApiException { ApiResultCode: ApiResultCode.TooManyRequests or ApiResultCode.ToManyRequestsForThisResource or ApiResultCode.TooManyConnectionsOnThisResource } => Busy(),
-        ApiException { ApiResultCode: ApiResultCode.ResourceAdministrativelyBlocked } => new StorageException(StorageErrorKind.AccessDenied,
-            $"MEGA has blocked {Describe(path)}."),
-        ApiException api => new StorageException(StorageErrorKind.Unknown, $"MEGA error ({api.ApiResultCode})."),
+        ApiException api => MapCode(api.ApiResultCode, path),
+        MegaApiCodeException raw => MapCode(raw.Code, path),
         NotSupportedException { Message: var m } when m.Contains("hashcash", StringComparison.OrdinalIgnoreCase) => Busy(),
         HttpRequestException or System.Net.WebException or TimeoutException => Unreachable(ex),
         _ => new StorageException(StorageErrorKind.Unknown, $"MEGA error: {ex.Message}", ex),
+    };
+
+    private StorageException MapCode(ApiResultCode code, string path) => code switch
+    {
+        ApiResultCode.TwoFactorAuthenticationError => new StorageException(StorageErrorKind.AuthenticationRequired,
+            "MEGA needs the 6-digit code from your authenticator app. Enter it and try again."),
+        ApiResultCode.BadSessionId or ApiResultCode.ResourceNotExists when path.Length == 0 => SignInFailed(),
+        ApiResultCode.ResourceNotExists => NotFound(path),
+        ApiResultCode.AccessDenied => Denied(path),
+        ApiResultCode.ResourceAlreadyExists => Exists(path),
+        ApiResultCode.QuotaExceeded => new StorageException(StorageErrorKind.Throttled,
+            "MEGA's transfer quota is used up for now. MEGA lifts it after a few hours (or with a paid plan)."),
+        ApiResultCode.TooManyRequests or ApiResultCode.ToManyRequestsForThisResource or ApiResultCode.TooManyConnectionsOnThisResource
+            or ApiResultCode.ResourceTemporarilyNotAvailable or ApiResultCode.RequestFailedRetry => Busy(),
+        ApiResultCode.ResourceAdministrativelyBlocked => new StorageException(StorageErrorKind.AccessDenied, $"MEGA has blocked {Describe(path)}."),
+        _ => new StorageException(StorageErrorKind.Unknown, $"MEGA error ({code})."),
     };
 
     public void Dispose()
@@ -268,7 +373,7 @@ public sealed class MegaProvider : RemotePathProvider, IDisposable
     }
 }
 
-public sealed class MegaConnector(ICredentialStore store) : FormConnectorBase(store)
+public sealed class MegaConnector(ICredentialStore store, IThumbnailGenerator? thumbnails = null) : FormConnectorBase(store)
 {
     public override CloudProviderType Type => CloudProviderType.Mega;
 
@@ -292,7 +397,7 @@ public sealed class MegaConnector(ICredentialStore store) : FormConnectorBase(st
         MegaApiClient.LogonSessionToken? session = null;
         if (secrets.Get("session") is { } id && secrets.Get("masterKey") is { } key)
             session = new MegaApiClient.LogonSessionToken(id, Convert.FromBase64String(key));
-        return new MegaProvider(account, account.Setting("user"), session is null ? secrets.Get("password") : null, secrets.Get("mfa"), session);
+        return new MegaProvider(account, account.Setting("user"), session is null ? secrets.Get("password") : null, secrets.Get("mfa"), session, thumbnails);
     }
 
     protected override CloudSecrets SecretsToStore(CloudSecrets typed, ICloudStorageProvider provider) =>
@@ -301,4 +406,49 @@ public sealed class MegaConnector(ICredentialStore store) : FormConnectorBase(st
             : typed;
 
     protected override CloudIdentity Identity(CloudAccount account) => new(account.Setting("user"), null, account.Setting("user"));
+}
+
+/// <summary>Forward-only view of a stream with a known size (the caller's stream is not disposed).</summary>
+internal sealed class KnownLengthStream(Stream inner, long length, bool keepCopy = false) : Stream
+{
+    private long _position;
+    private readonly MemoryStream? _copy = keepCopy ? new MemoryStream((int)Math.Min(length, int.MaxValue)) : null;
+
+    /// <summary>Everything read so far, when created with keepCopy (for thumbnails of pictures from another cloud).</summary>
+    public byte[]? Copy => _copy?.ToArray();
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => length;
+
+    public override long Position
+    {
+        get => _position;
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        int read = inner.Read(buffer, offset, count);
+        _position += read;
+        _copy?.Write(buffer, offset, read);
+        return read;
+    }
+
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        int read = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        _position += read;
+        _copy?.Write(buffer.Span[..read]);
+        return read;
+    }
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }

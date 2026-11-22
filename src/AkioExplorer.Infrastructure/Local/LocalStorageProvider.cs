@@ -16,7 +16,7 @@ namespace AkioExplorer.Infrastructure.Local;
 /// Enumeration uses <see cref="FileSystemEnumerable{TResult}"/> (no FileSystemInfo allocations) on a background
 /// thread and streams pages through a channel.
 /// </summary>
-public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvider
+public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvider, ITrashProvider
 {
     public const string ProviderId = "local";
     private const int PageSize = 2000;
@@ -384,6 +384,23 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
             File.Delete(path);
         }
     }
+
+    // ---------------------------------------------------------------- recycle bin
+
+    public string TrashName => "Recycle Bin";
+
+    public string RestoreFallbackName => "its original folder";
+
+    public Task<IReadOnlyList<TrashItem>> ListTrashAsync(CancellationToken cancellationToken) => Task.Run(RecycleBin.List, cancellationToken);
+
+    public Task RestoreAsync(IReadOnlyList<TrashItem> items, CancellationToken cancellationToken) =>
+        Task.Run(() => { foreach (var item in items) RecycleBin.Restore(item); }, cancellationToken);
+
+    public Task DeleteFromTrashAsync(IReadOnlyList<TrashItem> items, CancellationToken cancellationToken) =>
+        Task.Run(() => { foreach (var item in items) RecycleBin.Delete(item); }, cancellationToken);
+
+    /// <summary>Empties the Recycle Bin of every drive (the app asks first, so Windows' own prompt is off).</summary>
+    public Task EmptyTrashAsync(CancellationToken cancellationToken) => Task.Run(RecycleBin.Empty, cancellationToken);
 
     private static void SendToRecycleBin(IReadOnlyList<string> paths)
     {

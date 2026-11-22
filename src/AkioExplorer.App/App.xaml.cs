@@ -125,6 +125,18 @@ public partial class App : Application
         services.AddSingleton<ICloudConnector>(sp => new GoogleDriveConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
         services.AddSingleton<ICloudConnector>(sp => new DropboxConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
         services.AddSingleton<ICloudConnector>(sp => new OneDriveConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudConnector>(sp => new OneDriveBusinessConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudConnector>(sp => new SharePointConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<ICloudConnector>(sp => new CloudProviders.Box.BoxConnector(sp.GetRequiredService<CloudAppsConfig>(), sp.GetRequiredService<ICredentialStore>(), CloudHttp.Client));
+        services.AddSingleton<IThumbnailGenerator, Infrastructure.Thumbnails.ThumbnailGenerator>();
+        services.AddSingleton<ICloudConnector>(sp => new CloudProviders.Mega.MegaConnector(sp.GetRequiredService<ICredentialStore>(), sp.GetRequiredService<IThumbnailGenerator>()));
+        foreach (var preset in CloudProviders.WebDav.WebDavServices.All)
+            services.AddSingleton<ICloudConnector>(sp => new CloudProviders.WebDav.WebDavConnector(preset, sp.GetRequiredService<ICredentialStore>()));
+        foreach (var preset in CloudProviders.S3.S3Services.All)
+            services.AddSingleton<ICloudConnector>(sp => new CloudProviders.S3.S3Connector(preset, sp.GetRequiredService<ICredentialStore>()));
+        services.AddSingleton<ICloudConnector>(sp => new CloudProviders.Azure.AzureBlobConnector(sp.GetRequiredService<ICredentialStore>()));
+        services.AddSingleton<ICloudConnector>(sp => new CloudProviders.Ftp.FtpConnector(sp.GetRequiredService<ICredentialStore>()));
+        services.AddSingleton<ICloudConnector>(sp => new CloudProviders.Ftp.SftpConnector(sp.GetRequiredService<ICredentialStore>()));
         services.AddSingleton<ICloudAccountService, CloudAccountService>();
         services.AddSingleton<CloudAccountsViewModel>();
 

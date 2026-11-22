@@ -68,6 +68,27 @@ custom shortcuts (settings.json first, UI later).
 Get share link, Trash view + restore, Starred / Recent / Shared with me views, versions, storage usage panel.
 Each needs provider API work (Drive v3, Dropbox, Graph) and is only shown for services that support it.
 
+### MEGA parity (2026-11-22)
+
+Done through `MegaRawApi` (MEGA's JSON API with the stored session; MegaApiClient keeps login/upload/listing):
+Rubbish bin browser (restore to the original folder via the `rr` attribute, delete, empty), thumbnails and previews
+(shown, and generated + uploaded with every picture/video upload), public links (copy / turn off; also Google Drive),
+favourite / colour label / hide (`fav`, `lbl`, `sen`; star also on Google Drive), versions (list, restore with `ov`,
+delete), server-side copy inside an account, parallel downloads (4 × 4 MB ranges, AES-CTR per part, MAC checked),
+parallel uploads, Recent files and Photos & videos views (search presets), open/import links other people shared,
+MEGA S4 preset, transfer quota on paid plans.
+Not done: sharing folders with contacts and incoming shares (RSA share keys), file requests, Device centre (→ Phase 5d), chat.
+
+### Google Drive parity (2026-11-22)
+
+"Shared with me" and "Shared drives" as folders at the top of My Drive (create / rename / delete shared drives),
+Google Docs open in the browser (also "Open in browser" for anything), New ▸ Docs / Sheets / Slides / Forms / Drawings,
+Download as ▸ every export format, "Make a Google copy" (convert Office files), Share dialog (people + roles,
+ownership transfer, general access), comments (reply, resolve), activity (Drive Activity API: needs the new
+`drive.activity.readonly` scope, existing accounts reconnect once), versions (download, keep forever, delete,
+restore = re-upload), folder colours (labels), shortcuts, description, lock editing, Starred and Largest files views.
+Not possible through Google's public APIs: approvals, Workspace labels, spam, request access, Computers.
+
 ### Phase 5d – Sync
 
 Compare & sync two folders (local ↔ cloud), preview of the plan, one-way mirror and two-way.

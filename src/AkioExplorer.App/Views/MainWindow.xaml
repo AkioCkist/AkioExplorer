@@ -68,7 +68,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <FontIcon Glyph="&#xE753;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+            <Image Source="ms-appx:///Assets/AppIcon.png" Width="16" Height="16" VerticalAlignment="Center" />
             <TextBlock x:Name="TitleText" Grid.Column="1" Text="AkioExplorer" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
         </Grid>
 
@@ -261,6 +261,10 @@
                             </AppBarButton>
                             <AppBarButton Label="Open in Terminal" KeyboardAcceleratorTextOverride="Ctrl+Alt+T" Command="{x:Bind ViewModel.ActivePane.OpenTerminalCommand, Mode=OneWay}">
                                 <AppBarButton.Icon><FontIcon Glyph="&#xE756;" /></AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarSeparator />
+                            <AppBarButton Label="{x:Bind ViewModel.ActivePane.TrashLabel, Mode=OneWay}" Command="{x:Bind ViewModel.ActivePane.OpenTrashCommand, Mode=OneWay}">
+                                <AppBarButton.Icon><FontIcon Glyph="&#xE74D;" /></AppBarButton.Icon>
                             </AppBarButton>
                         </CommandBar.SecondaryCommands>
                     </CommandBar>

@@ -337,4 +337,92 @@ public class GoogleDriveProviderTests
         Assert.True(provider.IsSameOrDescendant("F2", "F1"));
         Assert.Equal("Bearer test-token", fake.Requests[0].Request.Headers.Authorization!.ToString());
     }
+
+    private static GoogleDriveProvider Provider(FakeHttp fake) =>
+        new(new CloudAccount { Type = CloudProviderType.GoogleDrive, DisplayName = "My Drive" }, new StaticTokens(), new HttpClient(fake), new FakeFactory(fake));
+
+    private static async Task<List<StorageItem>> List(GoogleDriveProvider provider, string path)
+    {
+        var items = new List<StorageItem>();
+        await foreach (var page in provider.ListAsync(path, CancellationToken.None)) items.AddRange(page);
+        return items;
+    }
+
+    [Fact]
+    public async Task Shared_drives_and_shared_with_me_are_folders_in_my_drive()
+    {
+        var fake = new FakeHttp()
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files/root"), """{"id":"ROOTID"}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/drives"), """{"drives":[{"id":"SD1","name":"Team"}]}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files") && Uri.UnescapeDataString(r.RequestUri.Query).Contains("sharedWithMe = true"), """
+                {"files":[{"id":"S1","name":"From Lan.pdf","mimeType":"application/pdf","size":"5"}]}
+                """)
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files") && Uri.UnescapeDataString(r.RequestUri.Query).Contains("'SD1' in parents"), """
+                {"files":[{"id":"T1","name":"Budget","mimeType":"application/vnd.google-apps.folder","parents":["SD1"],"driveId":"SD1","folderColorRgb":"#4986e7"}]}
+                """)
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files") && Uri.UnescapeDataString(r.RequestUri.Query).Contains("'root' in parents"), """{"files":[]}""");
+        var provider = Provider(fake);
+
+        var root = await List(provider, GoogleDriveProvider.Root);
+        Assert.Equal([GoogleDriveProvider.SharedDrivesPath, GoogleDriveProvider.SharedWithMePath], root.Select(i => i.Path));
+
+        var drives = await List(provider, GoogleDriveProvider.SharedDrivesPath);
+        var team = await List(provider, "SD1");
+        var shared = await List(provider, GoogleDriveProvider.SharedWithMePath);
+
+        Assert.Equal("Team", drives.Single().Name);
+        Assert.Equal(ItemLabel.Blue, team.Single().Label); // folder colour → label
+        Assert.Equal("From Lan.pdf", shared.Single().Name);
+        Assert.Equal(["My Drive", "Shared drives", "Team", "Budget"], provider.GetBreadcrumb("T1").Select(b => b.Name));
+        Assert.Equal(GoogleDriveProvider.SharedWithMePath, provider.GetParentPath("S1"));
+        // Listing inside a shared drive must name the drive.
+        var teamRequest = fake.Requests.Single(r => Uri.UnescapeDataString(r.Request.RequestUri!.Query).Contains("'SD1' in parents")).Request.RequestUri!.Query;
+        Assert.Contains("corpora=drive", teamRequest);
+        Assert.Contains("driveId=SD1", teamRequest);
+        await Assert.ThrowsAsync<StorageException>(() =>
+            provider.WriteFileAsync(GoogleDriveProvider.SharedWithMePath, "x.txt", new MemoryStream([1]), 1, false, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Google_docs_open_in_the_browser_and_offer_export_formats()
+    {
+        var fake = new FakeHttp()
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files/root"), """{"id":"ROOTID"}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/drives"), """{"drives":[]}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files"), """
+                {"files":[{"id":"D1","name":"Plan","mimeType":"application/vnd.google-apps.document","parents":["ROOTID"]},
+                          {"id":"X1","name":"report.docx","mimeType":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","size":"9","parents":["ROOTID"]}]}
+                """);
+        var provider = Provider(fake);
+        var items = await List(provider, GoogleDriveProvider.Root);
+        var doc = items.Single(i => i.Name == "Plan");
+        var docx = items.Single(i => i.Name == "report.docx");
+
+        Assert.True(provider.OpensInBrowser(doc));
+        Assert.False(provider.OpensInBrowser(docx));
+        Assert.Contains(provider.ExportOptions(doc), o => o.Extension == ".pdf");
+        Assert.Empty(provider.ExportOptions(docx));
+        Assert.True(provider.CanConvert(docx));
+        Assert.False(provider.CanConvert(doc));
+    }
+
+    [Fact]
+    public async Task Largest_files_search_sorts_on_the_server_and_stops_below_the_minimum()
+    {
+        var fake = new FakeHttp()
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files/root"), """{"id":"ROOTID"}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files") && r.RequestUri.Query.Contains("pageToken=P2"), """{"files":[{"id":"C","name":"c.bin","mimeType":"x","size":"10"}]}""")
+            .OnJson(r => r.RequestUri!.AbsolutePath.EndsWith("/files"), """
+                {"nextPageToken":"P2","files":[{"id":"A","name":"a.bin","mimeType":"x","size":"900000000"},{"id":"B","name":"b.bin","mimeType":"x","size":"5"}]}
+                """);
+        var provider = Provider(fake);
+        var query = SearchQuery.Empty with { Size = SizeFilter.Custom, MinSize = 10L * 1024 * 1024, Scope = SearchScope.Everywhere };
+
+        var found = new List<StorageItem>();
+        await foreach (var item in provider.SearchAsync(GoogleDriveProvider.Root, query, CancellationToken.None)) found.Add(item);
+
+        Assert.Equal(["a.bin"], found.Select(f => f.Name));
+        Assert.Contains(fake.Requests, r => r.Request.RequestUri!.Query.Contains("orderBy=quotaBytesUsed"));
+        Assert.DoesNotContain(fake.Requests, r => r.Request.RequestUri!.Query.Contains("pageToken=P2")); // stopped early
+    }
 }

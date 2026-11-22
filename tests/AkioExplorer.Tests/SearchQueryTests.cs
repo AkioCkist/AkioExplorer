@@ -189,3 +189,17 @@ public class SearchQueryTests
         public string? TryNormalizePath(string input) => input;
     }
 }
+
+public class MediaCategoryTests
+{
+    [Theory]
+    [InlineData("beach.jpg", true)]
+    [InlineData("clip.MP4", true)]
+    [InlineData("notes.txt", false)]
+    public void Media_matches_photos_and_videos(string name, bool expected)
+    {
+        var matcher = (SearchQuery.Empty with { Category = FileCategory.Media }).CreateMatcher(DateTimeOffset.Now);
+        var item = new StorageItem { Name = name, Path = "/" + name, Kind = StorageItemKind.File, Size = 1, Modified = DateTimeOffset.Now };
+        Assert.Equal(expected, matcher.Matches(item));
+    }
+}

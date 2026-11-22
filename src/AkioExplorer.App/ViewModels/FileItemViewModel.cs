@@ -14,7 +14,19 @@ public sealed partial class FileItemViewModel : ObservableObject
     private bool _smallRequested;
     private bool _largeRequested;
 
-    [ObservableProperty] private StorageItem _item;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsStarred), nameof(HasLabel), nameof(LabelBrush), nameof(LabelName))]
+    private StorageItem _item;
+
+    /// <summary>Favourite / starred on the cloud service (star after the name).</summary>
+    public bool IsStarred => Item.IsStarred;
+
+    public bool HasLabel => Item.Label != ItemLabel.None;
+
+    /// <summary>MEGA's label colours.</summary>
+    public Brush? LabelBrush => LabelColors.Brush(Item.Label);
+
+    public string LabelName => HasLabel ? $"Label: {Item.Label}" : string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayName))]
@@ -145,5 +157,30 @@ public sealed partial class FileItemViewModel : ObservableObject
             _ => string.Empty,
         };
         ModifiedText = item.Modified is { } modified ? Formatting.FormatDate(modified) : string.Empty;
+    }
+}
+
+/// <summary>Colours of <see cref="ItemLabel"/> (MEGA's palette), shared by the list and the menus.</summary>
+public static class LabelColors
+{
+    private static readonly Dictionary<ItemLabel, SolidColorBrush> Brushes = new();
+
+    public static Windows.UI.Color Color(ItemLabel label) => label switch
+    {
+        ItemLabel.Red => Windows.UI.Color.FromArgb(255, 0xF0, 0x37, 0x3A),
+        ItemLabel.Orange => Windows.UI.Color.FromArgb(255, 0xF9, 0x89, 0x1F),
+        ItemLabel.Yellow => Windows.UI.Color.FromArgb(255, 0xF5, 0xC3, 0x0F),
+        ItemLabel.Green => Windows.UI.Color.FromArgb(255, 0x4C, 0xC8, 0x4A),
+        ItemLabel.Blue => Windows.UI.Color.FromArgb(255, 0x3E, 0x8B, 0xF6),
+        ItemLabel.Purple => Windows.UI.Color.FromArgb(255, 0xA3, 0x5E, 0xD8),
+        ItemLabel.Grey => Windows.UI.Color.FromArgb(255, 0x9A, 0x9A, 0x9A),
+        _ => Windows.UI.Color.FromArgb(0, 0, 0, 0),
+    };
+
+    public static SolidColorBrush? Brush(ItemLabel label)
+    {
+        if (label == ItemLabel.None) return null;
+        if (!Brushes.TryGetValue(label, out var brush)) Brushes[label] = brush = new SolidColorBrush(Color(label));
+        return brush;
     }
 }

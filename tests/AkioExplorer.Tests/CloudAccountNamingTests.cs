@@ -60,7 +60,7 @@ public sealed class CloudAccountNamingTests
         public string Name => "OneDrive";
         public bool IsConfigured => true;
         public string SetupHint => string.Empty;
-        public Task<CloudIdentity> AuthenticateAsync(CloudAccount account, CancellationToken cancellationToken) => Task.FromResult(Next);
+        public Task<CloudIdentity> AuthenticateAsync(CloudAccount account, IReadOnlyDictionary<string, string> values, CancellationToken cancellationToken) => Task.FromResult(Next);
         public ICloudStorageProvider CreateProvider(CloudAccount account) => new OneDriveProvider(account, new HttpClient(), new StaticTokens());
         public Task SignOutAsync(CloudAccount account, CancellationToken cancellationToken) => Task.CompletedTask;
     }

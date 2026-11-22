@@ -22,13 +22,13 @@ namespace AkioExplorer.CloudProviders.GoogleDrive;
 /// without extra requests. <see cref="CombinePath"/> returns a virtual "parentId/name" address that
 /// <see cref="GetItemAsync"/> resolves by name, which lets the generic copy engine check for conflicts.
 /// </summary>
-public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
+public sealed partial class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider, ITrashProvider, IShareLinkProvider, IItemMarksProvider
 {
     public const string ServiceName = "Google Drive";
     public const string Root = "root";
     private const string FolderMime = "application/vnd.google-apps.folder";
     private const string ShortcutMime = "application/vnd.google-apps.shortcut";
-    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canDownload)";
+    private const string FileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canDownload),starred,driveId,folderColorRgb";
 
     private const string ApiBase = "https://www.googleapis.com/drive/v3";
 
@@ -86,11 +86,28 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public async IAsyncEnumerable<IReadOnlyList<StorageItem>> ListAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await EnsureRootIdAsync(cancellationToken).ConfigureAwait(false);
+        if (path == SharedDrivesPath)
+        {
+            yield return await ListSharedDrivesAsync(cancellationToken).ConfigureAwait(false);
+            yield break;
+        }
+        if (path == SharedWithMePath)
+        {
+            await foreach (var page in ListSharedWithMeAsync(cancellationToken).ConfigureAwait(false)) yield return page;
+            yield break;
+        }
+        if (path == Root) yield return await VirtualFoldersAsync(cancellationToken).ConfigureAwait(false);
+
         string folderId = await ResolveFolderIdAsync(path, cancellationToken).ConfigureAwait(false);
         string? pageToken = null;
         do
         {
             var request = _drive.Files.List();
+            if (_driveOf.TryGetValue(folderId, out var driveId))
+            {
+                request.Corpora = "drive"; // inside a shared drive
+                request.DriveId = driveId;
+            }
             request.Q = $"'{Escape(folderId)}' in parents and trashed = false";
             request.Fields = $"nextPageToken, files({FileFields})";
             request.PageSize = 1000;
@@ -110,6 +127,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public async Task<StorageItem?> GetItemAsync(string path, CancellationToken cancellationToken)
     {
         if (path == Root) return null;
+        if (VirtualFolder(path) is { } virtualFolder) return virtualFolder;
 
         int slash = path.LastIndexOf('/');
         if (slash > 0)
@@ -146,6 +164,8 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public async Task<StorageItem> CreateFolderAsync(string parentPath, string name, CancellationToken cancellationToken)
     {
         EnsureValidName(name);
+        if (parentPath == SharedDrivesPath) return await CreateSharedDriveAsync(name, cancellationToken).ConfigureAwait(false);
+        EnsureWritable(parentPath);
         string parent = await ResolveFolderIdAsync(parentPath, cancellationToken).ConfigureAwait(false);
         // Drive allows duplicate names; Explorer semantics don't, so refuse like a file system would.
         if (await GetItemAsync(CombinePath(parent, name), cancellationToken).ConfigureAwait(false) is not null)
@@ -162,6 +182,8 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public async Task<StorageItem> RenameAsync(string path, string newName, CancellationToken cancellationToken)
     {
         EnsureValidName(newName);
+        if (IsVirtual(path)) throw new StorageException(StorageErrorKind.NotSupported, $"\"{GetDisplayName(path)}\" can't be renamed.");
+        if (_sharedDrives.ContainsKey(path)) return await RenameSharedDriveAsync(path, newName, cancellationToken).ConfigureAwait(false);
         string id = await ResolveFolderIdAsync(path, cancellationToken).ConfigureAwait(false);
         if (GetParentPath(id) is { } parent && !string.Equals(GetDisplayName(id), newName, StringComparison.OrdinalIgnoreCase) &&
             await GetItemAsync(CombinePath(parent, newName), cancellationToken).ConfigureAwait(false) is not null)
@@ -174,12 +196,143 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         return ToItem(file, file.Parents?.FirstOrDefault());
     }
 
+    // ------------------------------------------------------------------ links, star
+
+    /// <summary>"Anyone with the link can view", like Drive's Share › Copy link.</summary>
+    public async Task<string> CreateShareLinkAsync(StorageItem item, CancellationToken cancellationToken)
+    {
+        if (item.Path == Root) throw new StorageException(StorageErrorKind.NotSupported, "My Drive itself can't be shared by link.");
+        var permission = _drive.Permissions.Create(new Google.Apis.Drive.v3.Data.Permission { Type = "anyone", Role = "reader" }, item.Path);
+        permission.SupportsAllDrives = true;
+        await ExecuteAsync(() => permission.ExecuteAsync(cancellationToken), item.Path).ConfigureAwait(false);
+        var get = _drive.Files.Get(item.Path);
+        get.Fields = "webViewLink";
+        get.SupportsAllDrives = true;
+        var file = await ExecuteAsync(() => get.ExecuteAsync(cancellationToken), item.Path).ConfigureAwait(false);
+        return file.WebViewLink ?? $"https://drive.google.com/open?id={item.Path}";
+    }
+
+    public async Task RemoveShareLinkAsync(StorageItem item, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var delete = _drive.Permissions.Delete(item.Path, "anyoneWithLink");
+            delete.SupportsAllDrives = true;
+            await ExecuteAsync(() => delete.ExecuteAsync(cancellationToken), item.Path).ConfigureAwait(false);
+        }
+        catch (StorageException ex) when (ex.Kind == StorageErrorKind.NotFound)
+        {
+            // No link to remove.
+        }
+    }
+
+    /// <summary>Folder colours (Drive has none for files).</summary>
+    public bool SupportsLabels => true;
+
+    public bool SupportsHiding => false;
+
+    public async Task SetStarredAsync(IReadOnlyList<StorageItem> items, bool starred, CancellationToken cancellationToken)
+    {
+        foreach (var item in items)
+        {
+            var update = _drive.Files.Update(new DriveFile { Starred = starred }, item.Path);
+            update.SupportsAllDrives = true;
+            await ExecuteAsync(() => update.ExecuteAsync(cancellationToken), item.Path).ConfigureAwait(false);
+        }
+    }
+
+    public async Task SetLabelAsync(IReadOnlyList<StorageItem> items, ItemLabel label, CancellationToken cancellationToken)
+    {
+        var folders = items.Where(i => i.IsContainer && !IsVirtual(i.Path) && !_sharedDrives.ContainsKey(i.Path)).ToList();
+        if (folders.Count == 0) throw new StorageException(StorageErrorKind.NotSupported, "Google Drive only colours folders.");
+        string color = label == ItemLabel.None ? DefaultFolderColor : $"#{LabelRgb(label).R:x2}{LabelRgb(label).G:x2}{LabelRgb(label).B:x2}";
+        foreach (var folder in folders)
+        {
+            var update = _drive.Files.Update(new DriveFile { FolderColorRgb = color }, folder.Path);
+            update.SupportsAllDrives = true;
+            await ExecuteAsync(() => update.ExecuteAsync(cancellationToken), folder.Path).ConfigureAwait(false);
+        }
+    }
+
+    public Task SetHiddenAsync(IReadOnlyList<StorageItem> items, bool hidden, CancellationToken cancellationToken) =>
+        throw new StorageException(StorageErrorKind.NotSupported, "Google Drive can't hide items.");
+
+    // ------------------------------------------------------------------ trash
+
+    public string TrashName => "Trash";
+
+    public string RestoreFallbackName => "My Drive";
+
+    public async Task<IReadOnlyList<TrashItem>> ListTrashAsync(CancellationToken cancellationToken)
+    {
+        var files = new List<DriveFile>();
+        string? page = null;
+        do
+        {
+            var list = _drive.Files.List();
+            list.Q = "trashed = true";
+            list.Fields = "nextPageToken, files(id,name,mimeType,size,trashedTime,modifiedTime,explicitlyTrashed,parents)";
+            list.PageSize = 1000;
+            list.PageToken = page;
+            var result = await ExecuteAsync(() => list.ExecuteAsync(cancellationToken), Root).ConfigureAwait(false);
+            // Files inside a trashed folder are "trashed" too; only list what was deleted itself (like Drive's own Trash).
+            files.AddRange(result.Files.Where(f => f.ExplicitlyTrashed != false));
+            page = result.NextPageToken;
+        } while (page is not null);
+
+        await LearnParentsAsync(files.Select(f => f.Parents?.FirstOrDefault()).OfType<string>(), cancellationToken).ConfigureAwait(false);
+        return files.Select(f =>
+        {
+            string? parent = f.Parents?.FirstOrDefault();
+            string? from = parent is null ? null
+                : parent == _rootId ? RestoreFallbackName
+                : _nodes.TryGetValue(parent, out var node) ? node.Name
+                : null;
+            return new TrashItem(f.Id, f.Name ?? "(unnamed)", f.MimeType == FolderMime, f.Size,
+                f.TrashedTimeDateTimeOffset?.ToLocalTime(), f.ModifiedTimeDateTimeOffset?.ToLocalTime(), from);
+        }).ToList();
+    }
+
+    public async Task RestoreAsync(IReadOnlyList<TrashItem> items, CancellationToken cancellationToken)
+    {
+        foreach (var item in items)
+        {
+            var untrash = _drive.Files.Update(new DriveFile { Trashed = false }, item.Id); // Drive puts it back in its folder
+            untrash.SupportsAllDrives = true;
+            await ExecuteAsync(() => untrash.ExecuteAsync(cancellationToken), item.Name).ConfigureAwait(false);
+        }
+        _resolvedFolders.Clear();
+    }
+
+    public async Task DeleteFromTrashAsync(IReadOnlyList<TrashItem> items, CancellationToken cancellationToken)
+    {
+        foreach (var item in items)
+        {
+            var delete = _drive.Files.Delete(item.Id);
+            delete.SupportsAllDrives = true;
+            await ExecuteAsync(() => delete.ExecuteAsync(cancellationToken), item.Name).ConfigureAwait(false);
+            _nodes.TryRemove(item.Id, out _);
+        }
+    }
+
+    public async Task EmptyTrashAsync(CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(() => _drive.Files.EmptyTrash().ExecuteAsync(cancellationToken), Root).ConfigureAwait(false);
+        _nodes.Clear(); // trashed folders may have been cached
+    }
+
     public async Task DeleteAsync(IReadOnlyList<string> paths, bool permanent, CancellationToken cancellationToken)
     {
         foreach (var path in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (path == Root) throw new StorageException(StorageErrorKind.NotSupported, "My Drive itself can't be deleted.");
+            if (IsVirtual(path)) throw new StorageException(StorageErrorKind.NotSupported, $"\"{GetDisplayName(path)}\" can't be deleted.");
+            if (_sharedDrives.ContainsKey(path))
+            {
+                await DeleteSharedDriveAsync(path, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
             string id = await ResolveFolderIdAsync(path, cancellationToken).ConfigureAwait(false);
             if (permanent)
             {
@@ -213,6 +366,11 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         // so the local check only covers what the query couldn't express.
         if (MimeQuery(query.Category) is not null) matcher = (query with { Category = FileCategory.Any }).CreateMatcher(DateTimeOffset.Now);
 
+        // Drive can't filter by size, but it can sort by it: biggest first, and stop below the minimum
+        // ("Storage" page: what takes the space). Saves listing the whole account.
+        long? minSize = query.SizeRange().Min;
+        bool bySize = minSize is > 0 && query.NameText.Length == 0 && query.ContentText.Length == 0;
+
         string? pageToken = null;
         do
         {
@@ -221,6 +379,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
             request.Fields = $"nextPageToken, files({FileFields})";
             request.PageSize = 200;
             request.Spaces = "drive";
+            if (bySize) request.OrderBy = "quotaBytesUsed desc";
             request.PageToken = pageToken;
             var result = await ExecuteAsync(() => request.ExecuteAsync(cancellationToken), path).ConfigureAwait(false);
             pageToken = result.NextPageToken;
@@ -232,6 +391,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
                 var item = ToItem(file, file.Parents?.FirstOrDefault());
                 if (matcher.Matches(item)) yield return item;
             }
+            if (bySize && files.Count > 0 && files[^1].Size is { } last && last < minSize) yield break;
         }
         while (pageToken is not null);
     }
@@ -266,6 +426,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         FileCategory.Folder => $"mimeType = '{FolderMime}'",
         FileCategory.Image => "(mimeType contains 'image/' or mimeType = 'application/vnd.google-apps.drawing')",
         FileCategory.Video => "mimeType contains 'video/'",
+        FileCategory.Media => "(mimeType contains 'image/' or mimeType contains 'video/')",
         FileCategory.Audio => "mimeType contains 'audio/'",
         FileCategory.Pdf => "mimeType = 'application/pdf'",
         FileCategory.Document => "(mimeType = 'application/vnd.google-apps.document' or mimeType contains 'wordprocessingml' or " +
@@ -378,7 +539,12 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         {
             url = $"{ApiBase}/files/{Uri.EscapeDataString(file.Path)}?alt=media&supportsAllDrives=true";
         }
+        return await OpenUrlAsync(url, file, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>GET with the account's token (one retry with a fresh token); Drive's refusals become readable errors.</summary>
+    private async Task<Stream> OpenUrlAsync(string url, StorageItem file, CancellationToken cancellationToken)
+    {
         for (int attempt = 0; ; attempt++)
         {
             string token = await _tokens.GetAccessTokenAsync(cancellationToken, forceRefresh: attempt > 0).ConfigureAwait(false);
@@ -423,6 +589,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     /// <summary>Resumable upload in 8 MiB chunks; the SDK retries failed chunks.</summary>
     public async Task<StorageItem> WriteFileAsync(string parentPath, string name, Stream content, long length, bool overwrite, CancellationToken cancellationToken)
     {
+        EnsureWritable(parentPath);
         EnsureValidName(name);
         string parent = await ResolveFolderIdAsync(parentPath, cancellationToken).ConfigureAwait(false);
         var existing = await GetItemAsync(CombinePath(parent, name), cancellationToken).ConfigureAwait(false);
@@ -512,6 +679,11 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
         int guard = 0;
         while (current is not null && current != Root && current != _rootId && guard++ < 64)
         {
+            if (IsVirtual(current))
+            {
+                chain.Add(new BreadcrumbSegment(GetDisplayName(current), current));
+                break;
+            }
             if (!_nodes.TryGetValue(current, out var node)) break;
             chain.Add(new BreadcrumbSegment(node.Name, current));
             current = node.Parent;
@@ -525,6 +697,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public string? GetParentPath(string path)
     {
         if (path == Root || path == _rootId) return null;
+        if (IsVirtual(path)) return Root;
         int slash = path.LastIndexOf('/');
         if (slash > 0) return path[..slash];
         if (_nodes.TryGetValue(path, out var node) && node.Parent is { } parent)
@@ -535,6 +708,8 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
     public string GetDisplayName(string path)
     {
         if (path == Root || path == _rootId) return DisplayName;
+        if (path == SharedDrivesPath) return SharedDrivesName;
+        if (path == SharedWithMePath) return SharedWithMeName;
         int slash = path.LastIndexOf('/');
         if (slash > 0) return path[(slash + 1)..];
         return _nodes.TryGetValue(path, out var node) ? node.Name : "…";
@@ -614,6 +789,7 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
 
         string? parentId = parentPath ?? file.Parents?.FirstOrDefault();
         if (parentId is not null && parentId == _rootId) parentId = Root;
+        if (file.DriveId is { } drive) _driveOf[id] = drive;
         _nodes[id] = (file.Name, parentId);
         _mimeById[id] = mime;
         if (!shortcut) // a shortcut's capabilities describe the shortcut, not its target
@@ -630,6 +806,8 @@ public sealed class GoogleDriveProvider : ICloudStorageProvider, IFileContentPro
             Path = id,
             Kind = folder ? StorageItemKind.Folder : StorageItemKind.File,
             Size = folder ? null : file.Size,
+            IsStarred = file.Starred == true,
+            Label = folder ? LabelOfColor(file.FolderColorRgb) : ItemLabel.None,
             Modified = file.ModifiedTimeDateTimeOffset?.ToLocalTime(),
             Created = file.CreatedTimeDateTimeOffset?.ToLocalTime(),
             TypeDescription = GoogleTypeName(mime) ?? (shortcut && !folder ? "Shortcut" : null),

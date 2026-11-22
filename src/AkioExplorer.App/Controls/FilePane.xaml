@@ -22,8 +22,19 @@
                         CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                         Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
                 <Image Source="{x:Bind Icon, Mode=OneWay}" Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"
-                           Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}" />
+                <Grid Grid.Column="1" Margin="0,0,12,0" ColumnSpacing="6" Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <!-- Marks kept on the cloud service: colour label, favourite -->
+                    <Ellipse Grid.Column="1" Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
+                             Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" ToolTipService.ToolTip="{x:Bind LabelName, Mode=OneWay}" />
+                    <FontIcon Grid.Column="2" Glyph="&#xE735;" FontSize="12" VerticalAlignment="Center" Foreground="#F5C30F"
+                              Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" ToolTipService.ToolTip="Favourite" />
+                </Grid>
                 <TextBox Grid.Column="1" x:Name="RenameBox" x:Load="{x:Bind IsRenaming, Mode=OneWay}"
                          Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          MinHeight="28" Height="28" Padding="8,3,8,0" Margin="-9,0,12,0" VerticalAlignment="Center"
@@ -51,6 +62,11 @@
                        Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasThumbnail), Mode=OneWay}" />
                 <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform"
                        Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}" />
+                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-2,0">
+                    <Ellipse Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
+                             Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" />
+                    <FontIcon Glyph="&#xE735;" FontSize="12" Foreground="#F5C30F" Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" />
+                </StackPanel>
                 <StackPanel Grid.Row="1" Spacing="4">
                     <!-- Rename in grid view happens in a wide popup under the tile (RenamePopup), not in this narrow cell. -->
                     <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"
@@ -124,6 +140,9 @@
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8A7;" /></MenuFlyoutSubItem.Icon>
                     <MenuFlyoutItem x:Name="MenuBgTerminal" Text="Terminal" Command="{x:Bind ViewModel.OpenTerminalCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+T">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE756;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuBgBrowser" Text="Browser" Command="{x:Bind ViewModel.OpenInBrowserCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE774;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <MenuFlyoutItem x:Name="MenuBgExplorer" Text="File Explorer" Command="{x:Bind ViewModel.RevealInExplorerCommand, Mode=OneWay}">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEC50;" /></MenuFlyoutItem.Icon>
@@ -319,6 +338,9 @@
                     <MenuFlyoutItem x:Name="MenuOpen" Text="Open" FontWeight="SemiBold" Command="{x:Bind ViewModel.OpenSelectedCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Enter">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuOpenBrowser" Text="Open in browser" Command="{x:Bind ViewModel.OpenInBrowserCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE774;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
                     <!-- Text and icon come from the preferred editor found on this PC (VS Code first). -->
                     <MenuFlyoutItem x:Name="MenuOpenEditor" Text="Open in VS Code" Command="{x:Bind ViewModel.OpenInEditorCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+E">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE943;" /></MenuFlyoutItem.Icon>
@@ -351,6 +373,12 @@
                     <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuShare" Text="Share…" Command="{x:Bind ViewModel.ShareCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72D;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="MenuCopyLink" Text="Copy link" Command="{x:Bind ViewModel.CopyLinkCommand, Mode=OneWay}">
+                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
+                    </MenuFlyoutItem>
                     <MenuFlyoutItem x:Name="MenuRename" Text="Rename" Command="{x:Bind ViewModel.RenameCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F2">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AC;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
@@ -374,6 +402,46 @@
                         </MenuFlyoutItem>
                         <MenuFlyoutItem x:Name="MenuCopyName" Text="Copy name" Command="{x:Bind ViewModel.CopyNameCommand, Mode=OneWay}">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyoutSubItem>
+                    <!-- Marks and history kept on the cloud service (MEGA, Google Drive) -->
+                    <MenuFlyoutSubItem x:Name="MenuCloud" Text="Cloud">
+                        <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE753;" /></MenuFlyoutSubItem.Icon>
+                        <MenuFlyoutItem x:Name="MenuStar" Text="Add to favourites" Command="{x:Bind ViewModel.ToggleStarCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutSubItem x:Name="MenuLabel" Text="Label">
+                            <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8EC;" /></MenuFlyoutSubItem.Icon>
+                        </MenuFlyoutSubItem>
+                        <MenuFlyoutItem x:Name="MenuCloudHide" Text="Hide" Command="{x:Bind ViewModel.ToggleCloudHiddenCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xED1A;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutSubItem x:Name="MenuDownloadAs" Text="Download as">
+                            <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE896;" /></MenuFlyoutSubItem.Icon>
+                        </MenuFlyoutSubItem>
+                        <MenuFlyoutItem x:Name="MenuConvert" Text="Make a Google copy (Docs/Sheets/Slides)" Command="{x:Bind ViewModel.ConvertToOnlineCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AB;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuAddShortcut" Text="Add shortcut to My Drive" Command="{x:Bind ViewModel.AddShortcutCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuComments" Text="Comments…" Command="{x:Bind ViewModel.ShowCommentsCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE90A;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuActivity" Text="Activity…" Command="{x:Bind ViewModel.ShowActivityCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE7C4;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuDescription" Text="Description…" Command="{x:Bind ViewModel.EditDescriptionCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70B;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuLock" Text="Lock / unlock editing" Command="{x:Bind ViewModel.ToggleLockCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72E;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuVersions" Text="Versions…" Command="{x:Bind ViewModel.ShowVersionsCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE81C;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuRemoveLink" Text="Turn off link…" Command="{x:Bind ViewModel.RemoveLinkCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8F8;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                     </MenuFlyoutSubItem>
                     <MenuFlyoutSubItem x:Name="MenuArchive" Text="Archive">

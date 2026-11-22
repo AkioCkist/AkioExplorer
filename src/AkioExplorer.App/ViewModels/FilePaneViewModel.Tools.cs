@@ -16,6 +16,13 @@ public enum PaneDialog
     SelectByPattern,
     DeselectByPattern,
     Checksum,
+    Trash,
+    Versions,
+    OpenLink,
+    Description,
+    Share,
+    Comments,
+    Activity,
 }
 
 /// <summary>Power-user tools: selection helpers, new file, batch rename, ZIP, folder sizes, attributes, terminal.</summary>

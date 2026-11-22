@@ -628,7 +628,78 @@ public sealed partial class FilePane : UserControl
         MenuHiddenAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.Hidden);
         MenuReadOnlyAttr.IsChecked = ViewModel.SelectionHas(StorageItemAttributes.ReadOnly);
 
-        foreach (var sub in new[] { MenuOpenIn, MenuOrganize, MenuArchive, MenuSendTo }) sub.Visibility = Show(HasVisibleItem(sub));
+        // Cloud ▸ (only what the service supports)
+        MenuCopyLink.Visibility = Show(ViewModel.CopyLinkCommand.CanExecute(null));
+        MenuRemoveLink.Visibility = Show(ViewModel.RemoveLinkCommand.CanExecute(null));
+        MenuStar.Visibility = Show(ViewModel.ToggleStarCommand.CanExecute(null));
+        MenuStar.Text = ViewModel.IsSelectionStarred ? "Remove from favourites" : "Add to favourites";
+        MenuCloudHide.Visibility = Show(ViewModel.ToggleCloudHiddenCommand.CanExecute(null));
+        MenuCloudHide.Text = ViewModel.IsSelectionHiddenOnService ? "Unhide" : "Hide";
+        MenuVersions.Visibility = Show(ViewModel.ShowVersionsCommand.CanExecute(null));
+        MenuOpenBrowser.Visibility = Show(single && ViewModel.OpenInBrowserCommand.CanExecute(null));
+        MenuShare.Visibility = Show(ViewModel.ShareCommand.CanExecute(null));
+        MenuConvert.Visibility = Show(ViewModel.ConvertToOnlineCommand.CanExecute(null));
+        MenuAddShortcut.Visibility = Show(ViewModel.AddShortcutCommand.CanExecute(null));
+        MenuAddShortcut.Text = $"Add shortcut to {ViewModel.Provider?.DisplayName ?? "My Drive"}";
+        MenuComments.Visibility = Show(ViewModel.ShowCommentsCommand.CanExecute(null));
+        MenuActivity.Visibility = Show(ViewModel.ShowActivityCommand.CanExecute(null));
+        MenuDescription.Visibility = Show(ViewModel.EditDescriptionCommand.CanExecute(null));
+        MenuLock.Visibility = Show(ViewModel.ToggleLockCommand.CanExecute(null));
+        BuildDownloadAsMenu();
+        BuildLabelMenu();
+
+        foreach (var sub in new[] { MenuOpenIn, MenuOrganize, MenuArchive, MenuSendTo, MenuCloud }) sub.Visibility = Show(HasVisibleItem(sub));
+    }
+
+    /// <summary>Download as ▸ the formats Google can export the selected document to.</summary>
+    private void BuildDownloadAsMenu()
+    {
+        var formats = ViewModel.SelectionExportOptions;
+        MenuDownloadAs.Visibility = Show(formats.Count > 0);
+        MenuDownloadAs.Items.Clear();
+        foreach (var format in formats)
+            MenuDownloadAs.Items.Add(new MenuFlyoutItem { Text = $"{format.Name} ({format.Extension})", Command = ViewModel.DownloadAsCommand, CommandParameter = format });
+    }
+
+    /// <summary>New ▸ Google Docs / Sheets / Slides / Forms / Drawings (added after the built-in entries).</summary>
+    private void BuildNewOnlineMenu()
+    {
+        foreach (var old in MenuNew.Items.Where(i => i.Tag is "online").ToList()) MenuNew.Items.Remove(old);
+        var types = ViewModel.OnlineDocumentTypes;
+        if (types.Count == 0) return;
+        int at = MenuNew.Items.IndexOf(MenuNewTabSeparator);
+        MenuNew.Items.Insert(at++, new MenuFlyoutSeparator { Tag = "online" });
+        foreach (var type in types)
+            MenuNew.Items.Insert(at++, new MenuFlyoutItem
+            {
+                Text = type.Name, Tag = "online", Icon = new FontIcon { Glyph = type.Glyph },
+                Command = ViewModel.NewOnlineDocumentCommand, CommandParameter = type,
+            });
+    }
+
+    /// <summary>Label ▸ None + the seven colours, the current one checked.</summary>
+    private void BuildLabelMenu()
+    {
+        bool can = ViewModel.SetLabelCommand.CanExecute(ItemLabel.None);
+        MenuLabel.Visibility = Show(can);
+        if (!can) return;
+        MenuLabel.Items.Clear();
+        var current = ViewModel.SelectionLabel;
+        foreach (var label in Enum.GetValues<ItemLabel>())
+        {
+            var item = new RadioMenuFlyoutItem
+            {
+                Text = label == ItemLabel.None ? "No label" : label.ToString(),
+                GroupName = "label",
+                IsChecked = label == current,
+                Command = ViewModel.SetLabelCommand,
+                CommandParameter = label,
+            };
+            if (label != ItemLabel.None)
+                item.Icon = new FontIcon { Glyph = "", Foreground = ViewModels.LabelColors.Brush(label) };
+            MenuLabel.Items.Add(item);
+            if (label == ItemLabel.None) MenuLabel.Items.Add(new MenuFlyoutSeparator());
+        }
     }
 
     /// <summary>A submenu with nothing usable inside is hidden rather than shown empty.</summary>
@@ -657,7 +728,9 @@ public sealed partial class FilePane : UserControl
         MenuNewFile.Visibility = Show(ViewModel.IsLocalFolder);
         MenuBgTerminal.Visibility = Show(ViewModel.IsLocalFolder);
         MenuBgEditor.Visibility = Show(ViewModel.IsLocalFolder);
+        MenuBgBrowser.Visibility = Show(ViewModel.OpenInBrowserCommand.CanExecute(null));
         MenuBgOpenIn.Visibility = Show(HasVisibleItem(MenuBgOpenIn));
+        BuildNewOnlineMenu();
         MenuBgSizes.Visibility = Show(ViewModel.IsLocalFolder);
     }
 
@@ -694,6 +767,40 @@ public sealed partial class FilePane : UserControl
             }
             case PaneDialog.Checksum:
                 if (vm.SelectedItems.Count == 1) await Views.ToolDialogs.ChecksumAsync(dialogs, vm.SelectedItems[0].Path);
+                break;
+            case PaneDialog.Versions:
+                if (vm.Provider is Core.Abstractions.IVersionsProvider versions && vm.SelectedItems.Count == 1 &&
+                    await Views.VersionsDialog.ShowAsync(dialogs, versions, vm.SelectedItems[0].Item))
+                    vm.OnTrashChanged(); // refresh + storage usage
+                break;
+            case PaneDialog.OpenLink:
+                if (vm.Provider is Core.Abstractions.IPublicLinkProvider links && vm.Location is { } here &&
+                    await Views.OpenLinkDialog.ShowAsync(dialogs, links, here.Path, vm.Provider.DisplayName) is { } imported)
+                {
+                    vm.OnTrashChanged();
+                    vm.ShowMessage($"Saved \"{imported.Name}\" here.", isError: false);
+                }
+                break;
+            case PaneDialog.Description:
+                if (vm.Provider is Core.Abstractions.IDescriptionProvider descriptions && vm.SelectedItems.Count == 1 &&
+                    await Views.CloudDialogs.EditDescriptionAsync(dialogs, descriptions, vm.SelectedItems[0].Item))
+                    vm.ShowMessage("Description saved.", isError: false);
+                break;
+            case PaneDialog.Share:
+                if (vm.Provider is Core.Abstractions.ISharingProvider sharing && vm.SelectedItems.Count == 1)
+                    await Views.CloudDialogs.ShowShareAsync(dialogs, sharing, vm.SelectedItems[0].Item);
+                break;
+            case PaneDialog.Comments:
+                if (vm.Provider is Core.Abstractions.ICommentsProvider comments && vm.SelectedItems.Count == 1)
+                    await Views.CloudDialogs.ShowCommentsAsync(dialogs, comments, vm.SelectedItems[0].Item);
+                break;
+            case PaneDialog.Activity:
+                if (vm.Provider is Core.Abstractions.IActivityProvider activity && vm.SelectedItems.Count == 1)
+                    await Views.CloudDialogs.ShowActivityAsync(dialogs, activity, vm.SelectedItems[0].Item);
+                break;
+            case PaneDialog.Trash:
+                if (vm.Provider is Core.Abstractions.ITrashProvider trash && await Views.TrashDialog.ShowAsync(dialogs, trash, vm.Provider.DisplayName))
+                    vm.OnTrashChanged();
                 break;
         }
         FocusList();

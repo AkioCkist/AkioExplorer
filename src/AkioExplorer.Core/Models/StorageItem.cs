@@ -19,6 +19,19 @@ public enum StorageItemAttributes
     ReparsePoint = 8,
 }
 
+/// <summary>Colour label (MEGA's labels; the order is MEGA's numbering).</summary>
+public enum ItemLabel
+{
+    None = 0,
+    Red = 1,
+    Orange = 2,
+    Yellow = 3,
+    Green = 4,
+    Blue = 5,
+    Purple = 6,
+    Grey = 7,
+}
+
 /// <summary>
 /// Provider-neutral description of a file, folder or drive. Immutable; providers create new instances on change.
 /// </summary>
@@ -52,6 +65,12 @@ public sealed record StorageItem
     public DateTimeOffset? Created { get; init; }
 
     public StorageItemAttributes Attributes { get; init; }
+
+    /// <summary>Favourite / starred on the service.</summary>
+    public bool IsStarred { get; init; }
+
+    /// <summary>Colour label on the service.</summary>
+    public ItemLabel Label { get; init; }
 
     /// <summary>Drive capacity in bytes (drives only).</summary>
     public long? TotalSize { get; init; }

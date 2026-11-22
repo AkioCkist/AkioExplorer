@@ -1,12 +1,29 @@
 namespace AkioExplorer.Core.Transfers;
 
 /// <summary>
+/// Hooks for a destination that uploads one file over several parallel connections: it can count bytes when the
+/// service receives them (instead of when they are read, which runs ahead of the network) and show its parts.
+/// </summary>
+public interface IUploadProgressSink
+{
+    /// <summary>From now on reads aren't counted; the writer reports <see cref="ReportSent"/> instead.</summary>
+    void CountOnSend();
+
+    /// <summary>Bytes sent (negative when a part is resent).</summary>
+    void ReportSent(long bytes);
+
+    /// <summary>Live parts of the upload (null when the file is done).</summary>
+    void ReportParts(PartedFileProgress? parts);
+}
+
+/// <summary>
 /// Read-only wrapper that reports bytes as they are consumed and pauses reading while the operation is paused.
 /// Wrapping the source stream makes pause/progress work for every executor, including SDK uploads that pull the
 /// stream themselves.
 /// </summary>
-public sealed class TransferStream : Stream
+public sealed class TransferStream : Stream, IUploadProgressSink
 {
+    private volatile bool _countOnSend;
     private readonly Stream _inner;
     private readonly ITransferProgress _progress;
     private readonly CancellationToken _cancellationToken;
@@ -20,6 +37,9 @@ public sealed class TransferStream : Stream
         _cancellationToken = cancellationToken;
         _leaveOpen = leaveOpen;
     }
+
+    /// <summary>The file on this PC being read, when the source is local (thumbnails for uploads).</summary>
+    public string? LocalPath => (_inner as FileStream)?.Name;
 
     public override bool CanRead => true;
 
@@ -38,7 +58,7 @@ public sealed class TransferStream : Stream
             long delta = value - Position;
             _inner.Position = value;
             _position = value;
-            if (delta < 0) _progress.Report(delta);
+            if (delta < 0 && !_countOnSend) _progress.Report(delta);
         }
     }
 
@@ -68,7 +88,7 @@ public sealed class TransferStream : Stream
         long before = Position;
         long after = _inner.Seek(offset, origin);
         _position = after;
-        if (after < before) _progress.Report(after - before);
+        if (after < before && !_countOnSend) _progress.Report(after - before);
         return after;
     }
 
@@ -76,8 +96,17 @@ public sealed class TransferStream : Stream
     {
         if (read <= 0) return;
         _position += read;
-        _progress.Report(read);
+        if (!_countOnSend) _progress.Report(read);
     }
+
+    public void CountOnSend() => _countOnSend = true;
+
+    public void ReportSent(long bytes)
+    {
+        if (bytes != 0) _progress.Report(bytes);
+    }
+
+    public void ReportParts(PartedFileProgress? parts) => _progress.ReportParts(parts);
 
     public override void Flush()
     {

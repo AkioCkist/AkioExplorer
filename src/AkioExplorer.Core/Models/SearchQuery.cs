@@ -16,6 +16,9 @@ public enum FileCategory
     Audio,
     Archive,
     Code,
+
+    /// <summary>Photos and videos together (MEGA's "Media" view).</summary>
+    Media,
 }
 
 public enum DateFilter
@@ -235,7 +238,11 @@ public sealed class SearchMatcher
                 : name.Contains(_name, StringComparison.OrdinalIgnoreCase)))
             return false;
 
-        if (_category != FileCategory.Any && FileCategories.Of(name, isFolder, typeDescription) != _category) return false;
+        if (_category != FileCategory.Any)
+        {
+            var kind = FileCategories.Of(name, isFolder, typeDescription);
+            if (_category == FileCategory.Media ? kind is not (FileCategory.Image or FileCategory.Video) : kind != _category) return false;
+        }
 
         if (_after is not null || _before is not null)
         {

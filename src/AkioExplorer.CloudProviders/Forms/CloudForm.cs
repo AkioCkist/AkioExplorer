@@ -82,7 +82,7 @@ public static class CloudForm
         {
             if (field.Optional) continue;
             bool filled = field.IsSecret ? secrets.Get(field.Key) is not null : settings.ContainsKey(field.Key);
-            if (!filled) throw new StorageException(StorageErrorKind.InvalidName, $"Enter {Article(field.Label)}.");
+            if (!filled) throw new StorageException(StorageErrorKind.InvalidName, $"Enter the {Lower(field.Label)}.");
         }
     }
 
@@ -103,9 +103,7 @@ public static class CloudForm
         return url.TrimEnd('/');
     }
 
-    private static string Article(string label)
-    {
-        string lower = label.Length > 1 && char.IsUpper(label[0]) && char.IsUpper(label[1]) ? label : char.ToLowerInvariant(label[0]) + label[1..];
-        return "aeiouAEIOU".Contains(lower[0]) ? "an " + lower : "a " + lower;
-    }
+    /// <summary>"User name" → "user name", but acronyms stay ("SSH key", "AccessKey ID").</summary>
+    private static string Lower(string label) =>
+        label.Length > 1 && char.IsUpper(label[0]) && !char.IsUpper(label[1]) ? char.ToLowerInvariant(label[0]) + label[1..] : label;
 }
