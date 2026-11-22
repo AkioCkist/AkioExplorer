@@ -60,8 +60,20 @@
                 <!-- Type icon until (and unless) a picture thumbnail arrives -->
                 <Image Source="{x:Bind LargeIcon, Mode=OneWay}" Width="48" Height="48"
                        Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasThumbnail), Mode=OneWay}" />
-                <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform"
-                       Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}" />
+                <!-- Sized to the picture, so the video badge sits on the picture's own corner -->
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}">
+                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform" />
+                    <!-- Video: the default player's icon in the corner (play glyph until that icon loads) -->
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,3,3" Padding="2" CornerRadius="4"
+                            Background="#B0000000" Visibility="{x:Bind conv:XamlHelpers.Visible(ShowVideoBadge), Mode=OneWay}"
+                            ToolTipService.ToolTip="Video">
+                        <Grid Width="16" Height="16">
+                            <FontIcon Glyph="&#xE768;" FontSize="11" Foreground="White" Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasIcon), Mode=OneWay}" />
+                            <Image Source="{x:Bind Icon, Mode=OneWay}" Width="16" Height="16" />
+                        </Grid>
+                    </Border>
+                </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-2,0">
                     <Ellipse Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
                              Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" />
