@@ -62,12 +62,49 @@ public static class SingleInstance
     private static readonly string MutexName = @"Local\" + Id;
     private static readonly string PipeName = Id + "-activate";
     private static Mutex? _mutex;
+    private static readonly CancellationTokenSource Stop = new();
+    private static readonly object Gate = new();
+    private static readonly List<LaunchRequest> Early = [];
+    private static Action<LaunchRequest>? _onRequest;
 
-    /// <summary>True when another instance took the request (this process should exit).</summary>
+    /// <summary>
+    /// True when another instance took the request (this process should exit). The first instance starts listening
+    /// here, before XAML loads: launches during its start-up (Win+E pressed twice, several folders opened at once)
+    /// are queued instead of timing out and starting second copies of the app.
+    /// </summary>
     public static bool TryHandOff(LaunchRequest request)
     {
         _mutex = new Mutex(initiallyOwned: true, MutexName, out bool created);
-        return !created && Send(request);
+        if (created) return BecomePrimary();
+
+        long deadline = Environment.TickCount64 + 10_000;
+        while (true)
+        {
+            if (Send(request, 1500)) return true;
+            // The running instance quit (or crashed) meanwhile: this launch becomes the instance.
+            if (TryAcquire(_mutex)) return BecomePrimary();
+            // Unreachable for good (e.g. it runs elevated, so its pipe refuses us): run normally rather than lose the request.
+            if (Environment.TickCount64 > deadline) return false;
+            Thread.Sleep(100);
+        }
+    }
+
+    private static bool BecomePrimary()
+    {
+        StartListening();
+        return false;
+    }
+
+    private static bool TryAcquire(Mutex mutex)
+    {
+        try
+        {
+            return mutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            return true; // the owner died without releasing it: ours now
+        }
     }
 
     /// <summary>Hands <paramref name="request"/> to the running instance, if there is one (used by the Win+E agent).</summary>
@@ -75,15 +112,15 @@ public static class SingleInstance
     {
         if (!Mutex.TryOpenExisting(MutexName, out var existing)) return false;
         existing.Dispose();
-        return Send(request);
+        return Send(request, 5000);
     }
 
-    private static bool Send(LaunchRequest request)
+    private static bool Send(LaunchRequest request, int timeout)
     {
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
-            client.Connect(3000);
+            client.Connect(timeout);
             if (GetNamedPipeServerProcessId(client.SafePipeHandle.DangerousGetHandle(), out uint pid)) AllowSetForegroundWindow(pid);
             var bytes = Encoding.UTF8.GetBytes(request.Serialize());
             client.Write(bytes, 0, bytes.Length);
@@ -92,24 +129,60 @@ public static class SingleInstance
         }
         catch (Exception)
         {
-            // The other instance is starting or stuck: run normally rather than lose the request.
             return false;
         }
     }
 
-    /// <summary>Listens for hand-offs; <paramref name="onRequest"/> runs on a background thread.</summary>
+    /// <summary>
+    /// Delivers hand-offs to <paramref name="onRequest"/> (on a background thread), starting with any that arrived
+    /// while the app was still loading.
+    /// </summary>
     public static void Listen(Action<LaunchRequest> onRequest)
+    {
+        LaunchRequest[] early;
+        lock (Gate)
+        {
+            _onRequest = onRequest;
+            early = [.. Early];
+            Early.Clear();
+        }
+        foreach (var request in early) onRequest(request);
+    }
+
+    /// <summary>The app is quitting: refuse hand-offs, so a new launch waits for the mutex and starts fresh.</summary>
+    public static void StopListening() => Stop.Cancel();
+
+    private static void Deliver(LaunchRequest request)
+    {
+        Action<LaunchRequest>? handler;
+        lock (Gate)
+        {
+            handler = _onRequest;
+            if (handler is null)
+            {
+                Early.Add(request);
+                return;
+            }
+        }
+        handler(request);
+    }
+
+    private static void StartListening()
     {
         var thread = new Thread(() =>
         {
-            while (true)
+            while (!Stop.IsCancellationRequested)
             {
                 try
                 {
-                    using var server = new NamedPipeServerStream(PipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.CurrentUserOnly);
-                    server.WaitForConnection();
+                    using var server = new NamedPipeServerStream(PipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.CurrentUserOnly | PipeOptions.Asynchronous);
+                    server.WaitForConnectionAsync(Stop.Token).GetAwaiter().GetResult();
                     using var reader = new StreamReader(server, Encoding.UTF8);
-                    onRequest(LaunchRequest.Deserialize(reader.ReadToEnd()));
+                    Deliver(LaunchRequest.Deserialize(reader.ReadToEnd()));
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
                 catch (Exception)
                 {

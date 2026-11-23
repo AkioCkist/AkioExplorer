@@ -444,6 +444,7 @@ public sealed partial class MainWindow : Window
     {
         if (_shutDown) return;
         _shutDown = true;
+        SingleInstance.StopListening(); // a launch from now on starts a fresh instance instead of reaching this dying one
         SaveSession();
         _tray?.Dispose();
         _tray = null;
