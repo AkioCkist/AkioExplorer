@@ -18,7 +18,7 @@ namespace AkioExplorer.CloudProviders.Box;
 /// Box through its v2.0 REST API. Box addresses items by id, so paths are resolved folder by folder and cached.
 /// Deletes go to the Box trash; big uploads use chunked upload sessions with SHA-1 digests per part.
 /// </summary>
-public sealed class BoxProvider : RemotePathProvider, IDirectDownloadProvider, IDisposable
+public sealed class BoxProvider : RemotePathProvider, IDirectDownloadProvider, IDisposable, ISharedLinkSource
 {
     public const string ServiceName = "Box";
     internal const string Api = "https://api.box.com/2.0";
@@ -45,6 +45,13 @@ public sealed class BoxProvider : RemotePathProvider, IDirectDownloadProvider, I
 
     public override StorageCapabilities Capabilities => base.Capabilities | StorageCapabilities.RecycleBin | StorageCapabilities.ServerSideCopy;
 
+    // ------------------------------------------------------------------ links other people shared
+
+    public bool CanOpenSharedLink(Uri link) => Core.Logic.SharedLinks.TryParseBox(link);
+
+    /// <summary>An app.box.com/s/… shared link, browsed read-only with this account.</summary>
+    public Task<SharedLinkTarget> OpenSharedLinkAsync(Uri link, CancellationToken cancellationToken) =>
+        Links.BoxLinkProvider.OpenAsync(link, _http, _tokens, cancellationToken);
     // ------------------------------------------------------------------ id resolution
 
     private async Task<(string Id, bool Folder)?> ResolveAsync(string path, CancellationToken cancellationToken)

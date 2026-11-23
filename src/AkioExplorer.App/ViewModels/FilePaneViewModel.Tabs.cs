@@ -94,6 +94,20 @@ public sealed partial class FilePaneViewModel
         OpenInNewTab(Location, activate: true);
     }
 
+    /// <summary>
+    /// The sidebar's New tab button: a new tab at the current folder, then the address bar ready to take a path or a
+    /// pasted link (Google Drive, MEGA, MediaFire, ftp://…).
+    /// </summary>
+    public async Task NewTabForAddressAsync()
+    {
+        if (Location is null) return;
+        var tab = new PaneTab();
+        tab.Describe(_registry.Find(Location.ProviderId), Location);
+        Tabs.Insert(ActiveTabIndex + 1, tab);
+        await SwitchToTabAsync(tab);
+        RequestAddressEdit();
+    }
+
     /// <summary>Opens <paramref name="location"/> in a new tab right after the current one.</summary>
     public void OpenInNewTab(StorageLocation location, bool activate)
     {

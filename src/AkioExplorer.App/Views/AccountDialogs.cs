@@ -563,7 +563,7 @@ public static class AccountDialogs
             "Client ID", NeedsSecret: true),
         CloudProviderType.Dropbox => new(
             "https://www.dropbox.com/developers/apps",
-            $"Create a \"Scoped access\" app with Full Dropbox, enable the files.* and account_info.read permissions, and add the redirect URI http://localhost:{DropboxConnector.RedirectPort}/",
+            $"Create a \"Scoped access\" app with Full Dropbox, enable the files.*, sharing.read and account_info.read permissions, and add the redirect URI http://localhost:{DropboxConnector.RedirectPort}/",
             "App key", NeedsSecret: false),
         _ => new(
             "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",

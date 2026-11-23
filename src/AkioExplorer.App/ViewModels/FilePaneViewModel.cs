@@ -48,6 +48,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private readonly IFileOperationService _operations;
     private readonly ClipboardService _clipboard;
     private readonly UndoService _undo;
+    private readonly LinkNavigator _links;
     private readonly HashSet<string> _pendingSelection = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Paths being deleted in the background: a refresh meanwhile must not bring their rows back.</summary>
@@ -84,10 +85,12 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         IFileOperationService operations,
         ClipboardService clipboard,
         UndoService undo,
+        LinkNavigator links,
         DispatcherQueue dispatcher,
         ILogger<FilePaneViewModel> logger)
     {
         _registry = registry;
+        _links = links;
         _cache = cache;
         _icons = icons;
         _shell = shell;
@@ -239,7 +242,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     /// <summary>Address bar autocomplete: sub-folders of the typed parent whose name starts with the typed prefix.</summary>
     public async Task<IReadOnlyList<string>> GetPathSuggestionsAsync(string text, CancellationToken cancellationToken)
     {
-        if (Provider is null || string.IsNullOrWhiteSpace(text)) return [];
+        if (Provider is null || string.IsNullOrWhiteSpace(text) || LinkNavigator.IsLink(text)) return [];
         int cut = text.LastIndexOfAny(['\\', '/']);
         if (cut < 0) return [];
 
@@ -535,6 +538,11 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     public async Task NavigateToTypedPathAsync(string text)
     {
         if (Provider is null) return;
+        if (LinkNavigator.IsLink(text))
+        {
+            await OpenLinkAsync(text);
+            return;
+        }
         string? path = Provider.TryNormalizePath(text);
         if (path is null)
         {
@@ -563,6 +571,44 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             await NavigateAsync(new StorageLocation(Provider.Id, parent));
             if (_byPath.TryGetValue(item.Path, out var vm)) SelectionRequested?.Invoke(this, [vm]);
+        }
+    }
+
+    /// <summary>
+    /// A link pasted into the address bar (Google Drive, MEGA, MediaFire, ftp://, sftp://…): browsed here when the app
+    /// can, otherwise opened in the default browser.
+    /// </summary>
+    private async Task OpenLinkAsync(string text)
+    {
+        _loadingDelay.Start();
+        LinkOutcome outcome;
+        try
+        {
+            outcome = await _links.OpenAsync(text, Provider, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Opening a pasted link failed");
+            outcome = new LinkOutcome.Failed($"Couldn't open the link: {ex.Message}");
+        }
+        finally
+        {
+            _loadingDelay.Stop();
+            IsLoading = false;
+        }
+
+        switch (outcome)
+        {
+            case LinkOutcome.Browse browse:
+                await NavigateAsync(browse.Folder);
+                if (browse.Select is { } select && _byPath.TryGetValue(select, out var vm)) SelectionRequested?.Invoke(this, [vm]);
+                break;
+            case LinkOutcome.LocalPath local:
+                await NavigateToTypedPathAsync(local.Path);
+                break;
+            case LinkOutcome.Failed failed:
+                ShowError(failed.Message);
+                break;
         }
     }
 

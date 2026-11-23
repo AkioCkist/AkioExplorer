@@ -13,7 +13,7 @@ namespace AkioExplorer.CloudProviders.Dropbox;
 /// Dropbox through the official Dropbox .NET SDK. Path addressed ("/Photos/2026"); the SDK refreshes short-lived
 /// access tokens itself from the refresh token kept in Windows Credential Manager.
 /// </summary>
-public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
+public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider, ISharedLinkSource
 {
     public const string ServiceName = "Dropbox";
     private const uint PageSize = 2000;
@@ -29,6 +29,12 @@ public sealed class DropboxProvider : PathCloudProvider, IFileContentProvider, I
     }
 
     private DropboxClient Client => _client ??= _clientFactory();
+
+    public bool CanOpenSharedLink(Uri link) => SharedLinks.TryParseDropbox(link, out _);
+
+    /// <summary>A dropbox.com/scl/… shared link, browsed read-only with this account.</summary>
+    public Task<SharedLinkTarget> OpenSharedLinkAsync(Uri link, CancellationToken cancellationToken) =>
+        Links.DropboxLinkProvider.OpenAsync(link, () => Client, cancellationToken);
 
     public override async IAsyncEnumerable<IReadOnlyList<StorageItem>> ListAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken)
     {

@@ -35,9 +35,9 @@ internal static class ServerFields
 
 public sealed class FtpConnector(ICredentialStore store) : FormConnectorBase(store)
 {
-    private const string Explicit = "FTPS – explicit TLS (recommended)";
-    private const string Implicit = "FTPS – implicit TLS (port 990)";
-    private const string Plain = "FTP – no encryption";
+    public const string Explicit = "FTPS – explicit TLS (recommended)";
+    public const string Implicit = "FTPS – implicit TLS (port 990)";
+    public const string Plain = "FTP – no encryption";
 
     public override CloudProviderType Type => CloudProviderType.Ftp;
 

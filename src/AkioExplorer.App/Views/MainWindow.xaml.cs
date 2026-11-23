@@ -67,6 +67,7 @@ public sealed partial class MainWindow : Window
         App.Services.GetRequiredService<AkioExplorer.Infrastructure.Shell.ShellMenuService>().OwnerWindow = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
         RootGrid.Loaded += OnRootLoaded;
+        RootGrid.Loaded += (_, _) => UpdateNewTabButton();
         RootGrid.SizeChanged += (_, _) => UpdateContentWidth();
         Nav.DisplayModeChanged += (_, _) => UpdateContentWidth();
         // Size the content for the pane's target state as soon as the toggle starts (IsPaneOpen is already the new
@@ -74,6 +75,9 @@ public sealed partial class MainWindow : Window
         // toolbar and re-flowed its "More" overflow at the end – the visible jerk.
         Nav.PaneOpening += (_, _) => UpdateContentWidth();
         Nav.PaneClosing += (_, _) => UpdateContentWidth();
+        Nav.PaneOpening += (_, _) => UpdateNewTabButton();
+        Nav.PaneClosing += (_, _) => UpdateNewTabButton();
+        Nav.DisplayModeChanged += (_, _) => UpdateNewTabButton();
         // Upload / Download show only on cloud folders: the toolbar's spacing is worked out again when they come or go.
         foreach (var command in Toolbar.PrimaryCommands.OfType<UIElement>())
             command.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => QueueToolbarJustify());
@@ -1348,6 +1352,24 @@ public sealed partial class MainWindow : Window
         a.Handled = true;
         ViewModel.ShowHiddenItems = !ViewModel.ShowHiddenItems;
         ViewModel.ActivePane.ShowMessage(ViewModel.ShowHiddenItems ? "Hidden items are shown." : "Hidden items are hidden.", isError: false);
+    }
+
+    private async void OnNewTabButtonClick(object sender, RoutedEventArgs e)
+    {
+        ShowExplorer();
+        await ViewModel.ActivePane.NewTabForAddressAsync();
+    }
+
+    /// <summary>Collapsed pane (48 px): just the + icon, centred.</summary>
+    private void UpdateNewTabButton()
+    {
+        bool open = Nav.IsPaneOpen || Nav.DisplayMode == NavigationViewDisplayMode.Minimal;
+        var labels = open ? Visibility.Visible : Visibility.Collapsed;
+        NewTabLabel.Visibility = labels;
+        NewTabKeys.Visibility = labels;
+        NewTabButton.Margin = open ? new Thickness(8, 6, 8, 10) : new Thickness(4, 6, 4, 10);
+        NewTabButton.Padding = open ? new Thickness(12, 0, 12, 0) : new Thickness(0);
+        NewTabButton.HorizontalContentAlignment = open ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
     }
 
     /// <summary>Tab commands change the listing: keep the keyboard in the list afterwards.</summary>

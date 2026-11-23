@@ -27,7 +27,7 @@ public sealed class DropboxConnector(CloudAppsConfig config, ICredentialStore st
     protected override OAuthClient CreateOAuthClient() => new(Endpoints, new OAuthApp(
         Registration.ClientId!,
         ClientSecret: null,
-        Scopes: ["account_info.read", "files.metadata.read", "files.metadata.write", "files.content.read", "files.content.write"],
+        Scopes: ["account_info.read", "files.metadata.read", "files.metadata.write", "files.content.read", "files.content.write", "sharing.read"],
         FixedRedirectPort: RedirectPort,
         ExtraAuthorizeParameters: new Dictionary<string, string> { ["token_access_type"] = "offline", ["force_reapprove"] = "true" }), Http);
 

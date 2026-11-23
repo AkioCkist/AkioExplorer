@@ -6,6 +6,7 @@ using AkioExplorer.CloudProviders.Auth;
 using AkioExplorer.CloudProviders.Http;
 using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Cloud;
+using AkioExplorer.Core.Logic;
 using AkioExplorer.Core.Models;
 using Google;
 using Google.Apis.Drive.v3;
@@ -22,7 +23,7 @@ namespace AkioExplorer.CloudProviders.GoogleDrive;
 /// without extra requests. <see cref="CombinePath"/> returns a virtual "parentId/name" address that
 /// <see cref="GetItemAsync"/> resolves by name, which lets the generic copy engine check for conflicts.
 /// </summary>
-public sealed partial class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider, ITrashProvider, IShareLinkProvider, IItemMarksProvider
+public sealed partial class GoogleDriveProvider : ICloudStorageProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider, ITrashProvider, IShareLinkProvider, IItemMarksProvider, ISharedLinkSource
 {
     public const string ServiceName = "Google Drive";
     public const string Root = "root";
@@ -735,6 +736,28 @@ public sealed partial class GoogleDriveProvider : ICloudStorageProvider, IFileCo
     /// <summary>Typed paths aren't meaningful for an id-based store; only the root name is accepted.</summary>
     public string? TryNormalizePath(string input) =>
         input.Trim().Equals(DisplayName, StringComparison.OrdinalIgnoreCase) || input.Trim() is "/" or "" ? Root : null;
+
+    // ------------------------------------------------------------------ links other people shared
+
+    public bool CanOpenSharedLink(Uri link) => SharedLinks.TryGetGoogleDriveId(link, out _, out _);
+
+    /// <summary>
+    /// Opens a drive.google.com / docs.google.com link with this account's access: a folder is browsed directly (its
+    /// id is a path here); a file opens its folder with it selected, when this account can see that folder.
+    /// </summary>
+    public async Task<SharedLinkTarget> OpenSharedLinkAsync(Uri link, CancellationToken cancellationToken)
+    {
+        if (!SharedLinks.TryGetGoogleDriveId(link, out string id, out _))
+            throw new StorageException(StorageErrorKind.NotSupported, "That isn't a Google Drive link.");
+
+        var item = await GetItemAsync(id, cancellationToken).ConfigureAwait(false)
+                   ?? throw new StorageException(StorageErrorKind.NotFound, $"\"{DisplayName}\" can't open that link: it was removed, or it isn't shared with this account.");
+        if (item.IsContainer) return new SharedLinkTarget(this, item.Path);
+
+        if (_nodes.TryGetValue(item.Path, out var node) && node.Parent is { } parent)
+            return new SharedLinkTarget(this, parent, item.Path);
+        throw new StorageException(StorageErrorKind.NotSupported, "The file was shared on its own, without its folder.");
+    }
 
     // ------------------------------------------------------------------ helpers
 

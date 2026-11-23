@@ -18,7 +18,7 @@ namespace AkioExplorer.CloudProviders.OneDrive;
 /// OneDrive (personal and work/school) through the Microsoft Graph v1.0 REST API, path addressed
 /// ("/Documents/Report.docx"). Large folders are paged (999 items per request) and streamed to the UI.
 /// </summary>
-public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider
+public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, IThumbnailProvider, IDirectDownloadProvider, ISharedLinkSource
 {
     public const string ServiceName = "OneDrive";
     internal const string GraphBase = "https://graph.microsoft.com/v1.0";
@@ -497,6 +497,13 @@ public sealed class OneDriveProvider : PathCloudProvider, IFileContentProvider, 
         };
     }
 
+    // ------------------------------------------------------------------ links other people shared
+
+    public bool CanOpenSharedLink(Uri link) => SharedLinks.TryParseOneDrive(link, out _);
+
+    /// <summary>A 1drv.ms / onedrive.live.com / SharePoint sharing link, browsed read-only with this account.</summary>
+    public Task<SharedLinkTarget> OpenSharedLinkAsync(Uri link, CancellationToken cancellationToken) =>
+        Links.OneDriveLinkProvider.OpenAsync(link, _http, _tokens, _graph, Type, _service, cancellationToken);
     private async Task<JsonDocument?> SendAsync(HttpMethod method, string url, JsonNode? body, CancellationToken cancellationToken, string path)
     {
         for (int attempt = 0; ; attempt++)

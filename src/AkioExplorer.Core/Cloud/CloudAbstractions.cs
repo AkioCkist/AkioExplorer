@@ -30,6 +30,9 @@ public enum CloudProviderType
     Backblaze,
     AzureBlob,
     MegaS4,
+
+    /// <summary>Only for shared links opened without an account (no sign-in connector).</summary>
+    MediaFire,
 }
 
 /// <summary>How the add-account dialog groups services.</summary>

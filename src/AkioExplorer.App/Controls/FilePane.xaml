@@ -303,12 +303,13 @@
 
             <Grid x:Name="AddressHost" Grid.Column="1" Height="32" CornerRadius="{ThemeResource ControlCornerRadius}"
                   Background="{ThemeResource GlassInsetBackgroundBrush}" BorderBrush="{ThemeResource GlassInsetBorderBrush}"
-                  BorderThickness="1" Tapped="OnAddressTapped" ToolTipService.ToolTip="Click to type a path, or a command to run here such as cmd or code . (Ctrl+L)">
+                  BorderThickness="1" Tapped="OnAddressTapped" ToolTipService.ToolTip="Click to type a path, a command to run here such as cmd or code ., or paste a shared link: Google Drive, Dropbox, OneDrive, Box, MEGA, MediaFire, ftp:// (Ctrl+L)">
                 <BreadcrumbBar x:Name="Crumbs" ItemsSource="{x:Bind ViewModel.Breadcrumb, Mode=OneWay}" ItemClicked="OnCrumbClicked"
                                VerticalAlignment="Center" Margin="6,0,6,0" />
                 <AutoSuggestBox x:Name="AddressBox" Visibility="Collapsed" VerticalAlignment="Center" BorderThickness="0" Margin="-1"
                                 QuerySubmitted="OnAddressSubmitted" TextChanged="OnAddressTextChanged" KeyDown="OnAddressKeyDown"
-                                LostFocus="OnAddressLostFocus" AutomationProperties.Name="Address" UpdateTextOnSelect="True" />
+                                LostFocus="OnAddressLostFocus" AutomationProperties.Name="Address" UpdateTextOnSelect="True"
+                                PlaceholderText="Path, command, or a shared link (Drive, Dropbox, OneDrive, Box, MEGA, MediaFire, ftp://)" />
             </Grid>
 
             <AutoSuggestBox x:Name="FilterBox" Grid.Column="2" VerticalAlignment="Center"

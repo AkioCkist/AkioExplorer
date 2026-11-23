@@ -140,6 +140,11 @@ public partial class App : Application
         services.AddSingleton<ICloudAccountService, CloudAccountService>();
         services.AddSingleton<CloudAccountsViewModel>();
 
+        // Links pasted into the address bar: services whose shared links open without an account.
+        services.AddSingleton<ISharedLinkSource, CloudProviders.Links.MegaLinkSource>();
+        services.AddSingleton<ISharedLinkSource>(_ => new CloudProviders.Links.MediaFireLinkSource());
+        services.AddSingleton<LinkNavigator>();
+
         // File operations engine (transfer executors per provider pair; cloud executors arrive in Phase 4)
         // Executors are tried in order: OS copy engine (local↔local), server-side copy (same cloud account),
         // streaming (upload, download, cloud↔cloud).
