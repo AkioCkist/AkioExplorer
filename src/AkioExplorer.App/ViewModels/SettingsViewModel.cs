@@ -216,7 +216,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         if (value && !KeepRunningInBackground) KeepRunningInBackground = true; // autostart is only useful in the tray
     }, value ? "AkioExplorer starts hidden in the notification area when you sign in." : "AkioExplorer no longer starts with Windows.");
 
-    partial void OnKeepRunningInBackgroundChanged(bool value) => Set(x => x.KeepRunningInBackground = value, notify: true);
+    partial void OnKeepRunningInBackgroundChanged(bool value)
+    {
+        Set(x => x.KeepRunningInBackground = value, notify: true);
+        if (!value && QuickSearchEnabled) QuickSearchEnabled = false; // the hotkey dies with the window otherwise
+    }
 
     partial void OnQuickSearchEnabledChanged(bool value)
     {

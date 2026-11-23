@@ -192,7 +192,7 @@
                     </controls:SettingRow>
                     <TextBlock Text="{x:Bind ViewModel.QuickSearchStatus, Mode=OneWay}" TextWrapping="Wrap" Margin="4,0,0,4"
                                Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                    <controls:SettingRow Glyph="&#xE7E8;" Header="Keep running in the background" Description="Closing the window keeps AkioExplorer in the notification area, so the next folder opens instantly. Exit from the icon's menu.">
+                    <controls:SettingRow Glyph="&#xE7E8;" Header="Keep running in the background" Description="Closing the window keeps AkioExplorer in the notification area, so the next folder opens instantly and the quick-search hotkey keeps working. Exit from the icon's menu. Turning this off turns off quick search.">
                         <ToggleSwitch IsOn="{x:Bind ViewModel.KeepRunningInBackground, Mode=TwoWay}" AutomationProperties.Name="Keep running in the background" />
                     </controls:SettingRow>
                     <controls:SettingRow Glyph="&#xE7B5;" Header="Start with Windows" Description="Start hidden in the notification area when you sign in (turns on Keep running in the background).">

@@ -3,7 +3,21 @@ using System.Runtime.InteropServices;
 namespace AkioExplorer.App.Services;
 
 /// <summary>
-/// Notification-area icon for "keep running in the background": click opens the window, right-click offers Exit.
+/// One entry of the tray menu: a command, a checkbox (<see cref="Checked"/> not null), a submenu
+/// (<see cref="Children"/>) or a separator. <see cref="Glyph"/> is a Segoe Fluent Icons code point.
+/// </summary>
+public sealed record TrayMenuItem(
+    string Text, Action? Invoke = null, string? Glyph = null, string? Keys = null, bool? Checked = null,
+    bool IsDefault = false, bool IsEnabled = true, IReadOnlyList<TrayMenuItem>? Children = null)
+{
+    public static TrayMenuItem Separator { get; } = new("-");
+
+    public bool IsSeparator => ReferenceEquals(this, Separator);
+}
+
+/// <summary>
+/// Notification-area icon for "keep running in the background": click opens the window, right-click asks for the
+/// quick-action menu (drawn by WinUI in <see cref="Views.TrayMenuWindow"/>, so it looks like the rest of the app).
 /// Plain Shell_NotifyIcon on a message-only window owned by the UI thread (WinUI has no tray API).
 /// </summary>
 public sealed class TrayIcon : IDisposable
@@ -17,14 +31,12 @@ public sealed class TrayIcon : IDisposable
     private const int NIN_KEYSELECT = 0x0401;
     private const uint NIM_ADD = 0, NIM_DELETE = 2, NIM_SETVERSION = 4;
     private const uint NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4;
-    private const uint TPM_RETURNCMD = 0x0100, TPM_RIGHTBUTTON = 0x0002;
-    private const int CmdOpen = 1, CmdExit = 2, CmdQuickSearch = 3;
+    private const uint IMAGE_ICON = 1, LR_LOADFROMFILE = 0x10;
+    private const int SM_CXSMICON = 49, SM_CYSMICON = 50;
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
     private readonly Action _open;
-    private readonly Action _exit;
-    private readonly Action? _quickSearch;
-    private readonly Func<string?>? _quickSearchKeys;
+    private readonly Action<int, int> _showMenu;
     private readonly WndProc _proc; // kept alive: native code calls it
     private readonly uint _taskbarCreated;
     private readonly string _className = "AkioExplorerTray" + Environment.ProcessId;
@@ -32,14 +44,12 @@ public sealed class TrayIcon : IDisposable
     private IntPtr _icon;
     private bool _added;
 
-    /// <param name="quickSearch">Opens the quick-search popup (menu item shown when given).</param>
-    /// <param name="quickSearchKeys">Its current hotkey for the menu label, or null when none works.</param>
-    public TrayIcon(Action open, Action exit, Action? quickSearch = null, Func<string?>? quickSearchKeys = null)
+    /// <param name="open">Left click: show the window.</param>
+    /// <param name="showMenu">Right click: show the menu at this screen point (physical pixels).</param>
+    public TrayIcon(Action open, Action<int, int> showMenu)
     {
         _open = open;
-        _exit = exit;
-        _quickSearch = quickSearch;
-        _quickSearchKeys = quickSearchKeys;
+        _showMenu = showMenu;
         _proc = WindowProc;
         _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
 
@@ -53,8 +63,22 @@ public sealed class TrayIcon : IDisposable
         RegisterClassEx(ref wc);
         _hwnd = CreateWindowEx(0, _className, "AkioExplorer tray", 0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
 
-        var stock = new SHSTOCKICONINFO { cbSize = (uint)Marshal.SizeOf<SHSTOCKICONINFO>() };
-        if (SHGetStockIconInfo(3 /* SIID_FOLDER */, 0x100 | 0x1 /* SHGSI_ICON | SHGSI_SMALLICON */, ref stock) == 0) _icon = stock.hIcon;
+        _icon = LoadAppIcon();
+        if (_icon == IntPtr.Zero)
+        {
+            var stock = new SHSTOCKICONINFO { cbSize = (uint)Marshal.SizeOf<SHSTOCKICONINFO>() };
+            if (SHGetStockIconInfo(3 /* SIID_FOLDER */, 0x100 | 0x1 /* SHGSI_ICON | SHGSI_SMALLICON */, ref stock) == 0) _icon = stock.hIcon;
+        }
+    }
+
+    /// <summary>The app's own icon at the notification area's size for this DPI (the .ico has 16–256 px images).</summary>
+    private static IntPtr LoadAppIcon()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (!File.Exists(path)) return IntPtr.Zero;
+        uint dpi = GetDpiForSystem();
+        int cx = GetSystemMetricsForDpi(SM_CXSMICON, dpi), cy = GetSystemMetricsForDpi(SM_CYSMICON, dpi);
+        return LoadImage(IntPtr.Zero, path, IMAGE_ICON, cx > 0 ? cx : 16, cy > 0 ? cy : 16, LR_LOADFROMFILE);
     }
 
     public bool IsVisible => _added;
@@ -117,20 +141,8 @@ public sealed class TrayIcon : IDisposable
 
     private void ShowMenu()
     {
-        IntPtr menu = CreatePopupMenu();
-        AppendMenu(menu, 0, CmdOpen, "Open AkioExplorer");
-        if (_quickSearch is not null)
-            AppendMenu(menu, 0, CmdQuickSearch, _quickSearchKeys?.Invoke() is { Length: > 0 } keys ? "Quick search	" + keys : "Quick search");
-        AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
-        AppendMenu(menu, 0, CmdExit, "Exit");
-        SetMenuDefaultItem(menu, CmdOpen, false);
         GetCursorPos(out var pt);
-        SetForegroundWindow(_hwnd); // required so the menu closes when clicking elsewhere
-        int cmd = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.X, pt.Y, _hwnd, IntPtr.Zero);
-        DestroyMenu(menu);
-        if (cmd == CmdOpen) _open();
-        else if (cmd == CmdExit) _exit();
-        else if (cmd == CmdQuickSearch) _quickSearch?.Invoke();
+        _showMenu(pt.X, pt.Y);
     }
 
     public void Dispose()
@@ -207,11 +219,8 @@ public sealed class TrayIcon : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern bool Shell_NotifyIcon(uint message, ref NOTIFYICONDATA data);
     [DllImport("shell32.dll")] private static extern int SHGetStockIconInfo(uint siid, uint flags, ref SHSTOCKICONINFO info);
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
-    [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool AppendMenu(IntPtr menu, uint flags, int id, string? text);
-    [DllImport("user32.dll")] private static extern bool SetMenuDefaultItem(IntPtr menu, int item, bool byPosition);
-    [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
-    [DllImport("user32.dll")] private static extern int TrackPopupMenuEx(IntPtr menu, uint flags, int x, int y, IntPtr hwnd, IntPtr tpm);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int cx, int cy, uint load);
+    [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] private static extern int GetSystemMetricsForDpi(int index, uint dpi);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
-    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
 }

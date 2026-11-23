@@ -5,6 +5,7 @@ using AkioExplorer.App.Services;
 using AkioExplorer.App.ViewModels;
 using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Models;
+using AkioExplorer.Infrastructure.Local;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Windowing;
@@ -100,6 +101,12 @@ public sealed partial class MainWindow : Window
         }
         BuildSidebar();
         _settings.Changed += (_, _) => DispatcherQueue.TryEnqueue(OnIntegrationSettingsChanged);
+        if (_settings.Current.QuickSearchEnabled && !_settings.Current.KeepRunningInBackground)
+        {
+            // The quick-search hotkey only works while the process runs: closing the window must not quit.
+            _settings.Current.KeepRunningInBackground = true;
+            _settings.Save();
+        }
         if (_settings.Current.KeepRunningInBackground) EnsureTray();
         ApplyBackdrop();
         InitQuickSearch();
@@ -168,8 +175,85 @@ public sealed partial class MainWindow : Window
 
     private void EnsureTray()
     {
-        _tray ??= new TrayIcon(ShowAndActivate, ExitApp, ToggleQuickSearch, () => _hotkey?.Active?.ToString());
+        _tray ??= new TrayIcon(ShowAndActivate, ShowTrayMenu);
         _tray.Show();
+    }
+
+    private TrayMenuWindow? _trayMenu;
+
+    private void ShowTrayMenu(int x, int y)
+    {
+        _trayMenu ??= new TrayMenuWindow();
+        var theme = _settings.Current.Theme switch
+        {
+            AppTheme.Light => ElementTheme.Light,
+            AppTheme.Dark => ElementTheme.Dark,
+            _ => RootGrid.ActualTheme,
+        };
+        _trayMenu.Show(BuildTrayMenu(), x, y, theme);
+    }
+
+    /// <summary>Right-click menu of the notification-area icon: the things worth one click without opening the window.</summary>
+    private List<TrayMenuItem> BuildTrayMenu()
+    {
+        var items = new List<TrayMenuItem>
+        {
+            new("Open AkioExplorer", ShowAndActivate, "", IsDefault: true),
+        };
+        if (_settings.Current.QuickSearchEnabled)
+            items.Add(new("Quick search", ToggleQuickSearch, "", _hotkey?.Active?.ToString()));
+        items.Add(TrayMenuItem.Separator);
+
+        // Everyday folders one click away; the rest of the known folders and the favorites in submenus.
+        var known = App.Services.GetRequiredService<IKnownFoldersService>().GetKnownFolders();
+        string[] everyday =
+        [
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        ];
+        var direct = known.Where(f => everyday.Contains(f.Path, StringComparer.OrdinalIgnoreCase) ||
+                                      f.Name.Equals("Downloads", StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var folder in direct)
+            items.Add(new(folder.Name, () => OpenFromTray(new StorageLocation(LocalStorageProvider.ProviderId, folder.Path)), folder.Glyph));
+        var others = known.Except(direct)
+            .Select(f => new TrayMenuItem(f.Name, () => OpenFromTray(new StorageLocation(LocalStorageProvider.ProviderId, f.Path)), f.Glyph))
+            .ToList();
+        if (others.Count > 0) items.Add(new("More folders", Glyph: "", Children: others));
+        if (ViewModel.Favorites.Count > 0)
+        {
+            var favorites = ViewModel.Favorites
+                .Select(f => new TrayMenuItem(f.Name, () => OpenFromTray(new StorageLocation(f.ProviderId, f.Path)), ""))
+                .ToList();
+            items.Add(new("Favorites", Glyph: "", Children: favorites));
+        }
+        items.Add(TrayMenuItem.Separator);
+
+        int running = ViewModel.Operations.ActiveCount;
+        items.Add(new(running > 0 ? $"Transfer queue ({running} running)" : "Transfer queue", () => { ShowAndActivate(); ShowTransfers(history: false); }, ""));
+        items.Add(new("Recent transfers", () => { ShowAndActivate(); ShowTransfers(history: true); }, ""));
+        items.Add(new("Settings", () => { ShowAndActivate(); ShowSettings(); }, ""));
+        items.Add(TrayMenuItem.Separator);
+
+        if (_hotkey is { } hotkey && _settings.Current.QuickSearchEnabled)
+            items.Add(new("Pause hotkey (game mode)", () => hotkey.Paused = !hotkey.Paused, "", Checked: hotkey.Paused));
+        var settingsVm = App.Services.GetRequiredService<SettingsViewModel>();
+        items.Add(new("Start with Windows", () => settingsVm.StartWithWindows = !settingsVm.StartWithWindows, "", Checked: settingsVm.StartWithWindows));
+        items.Add(TrayMenuItem.Separator);
+        items.Add(new("Exit", ExitApp, ""));
+        return items;
+    }
+
+    /// <summary>A folder picked in the tray menu: local ones like any outside open (new tab), clouds in the active pane.</summary>
+    private async void OpenFromTray(StorageLocation location)
+    {
+        if (location.ProviderId == LocalStorageProvider.ProviderId)
+        {
+            HandleLaunch(new LaunchRequest(location.Path, false));
+            return;
+        }
+        ShowAndActivate();
+        ShowExplorer();
+        await ViewModel.NavigateActiveAsync(location);
     }
 
     /// <summary>Tray › Exit: really quit, even with "keep running in the background" on.</summary>
@@ -293,6 +377,8 @@ public sealed partial class MainWindow : Window
         _tray?.Dispose();
         _tray = null;
         _quickSearch?.CloseForExit(); // a hidden popup would otherwise keep the process alive
+        _trayMenu?.CloseForExit();
+        _trayMenu = null;
         _quickSearch = null;
         _hotkey?.Dispose();
         // Jobs still running are kept as "Interrupted" in Recent transfers so they can be retried next time.

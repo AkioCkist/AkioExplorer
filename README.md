@@ -101,6 +101,41 @@ dotnet test tests/AkioExplorer.Tests
 
 Set `AKIO_DEBUG_LOG=1` to write debug-level logs.
 
+## Release build (full performance)
+
+Use this build day to day: it's optimized, starts faster (ReadyToRun precompiles the code, so less JIT at startup; TieredPGO tunes hot paths while it runs) and is self-contained (no .NET or Windows App SDK install needed). Takes about a minute.
+
+```powershell
+dotnet publish src/AkioExplorer.App -c Release -p:Platform=x64 -o publish\x64
+```
+
+Run it:
+
+```powershell
+.\publish\x64\AkioExplorer.exe
+```
+
+- Copy the whole `publish\x64` folder (≈ 300 MB, 560 files) to keep or move the app, not just the exe.
+- Quit the running AkioExplorer first (tray icon › Exit): it is single-instance, so a new start just hands over to the old one, and a running app locks the files being replaced.
+- If "Use AkioExplorer instead of File Explorer", "Start with Windows" or "Add to PATH" was turned on from another folder (e.g. the Debug build), turn them off and on again in Settings › Windows integration so Windows points at the new exe.
+- Other CPUs: `-p:Platform=ARM64 -o publish\arm64` or `-p:Platform=x86 -o publish\x86`.
+- Debug-only aids (`AKIO_DEV_CLOUD`) are left out of Release builds.
+
+## Quick search (launcher popup)
+
+Press **Alt+Space** anywhere in Windows (change it in Settings › Windows integration) to search apps, files and folders and the web, Flow Launcher style. Files come from the **Everything** index (voidtools), so Everything must be running; the same index makes the in-app search (Enter in the filter box) instant. Without Everything, in-app search falls back to a multi-threaded disk walk.
+
+If another launcher (Flow Launcher, PowerToys Run) owns Alt+Space, Settings says so; quit it and AkioExplorer takes the key within a few seconds.
+
+| Action | Keys |
+|---|---|
+| Move / open | ↑ ↓ / Enter, or Alt+1…9 |
+| Accept the grey suggestion | Tab |
+| Show in AkioExplorer | Ctrl+Enter |
+| Run as administrator | Ctrl+Shift+Enter |
+| Copy path | Ctrl+Shift+C |
+| Close | Esc (or click elsewhere) |
+
 ## Keyboard shortcuts
 
 | Action | Keys |

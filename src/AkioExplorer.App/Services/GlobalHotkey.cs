@@ -23,6 +23,7 @@ public sealed class GlobalHotkey : IDisposable
     private HotkeyGesture? _registered;
     private HotkeyGesture? _wanted;
     private bool _suspended;
+    private bool _paused;
 
     public GlobalHotkey()
     {
@@ -70,14 +71,28 @@ public sealed class GlobalHotkey : IDisposable
         Apply();
     }
 
+    /// <summary>
+    /// Tray › Pause hotkey ("game mode"): hands the key back to other apps until unpaused or AkioExplorer restarts.
+    /// </summary>
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            if (_paused == value) return;
+            _paused = value;
+            Apply();
+        }
+    }
+
     private bool Apply()
     {
         Unregister();
         KillTimer(_hwnd, RetryTimerId);
-        if (_suspended || _wanted is not { IsValid: true } wanted || _hwnd == IntPtr.Zero)
+        if (_suspended || _paused || _wanted is not { IsValid: true } wanted || _hwnd == IntPtr.Zero)
         {
-            SetStatus(string.Empty);
-            return _wanted is null || _suspended;
+            SetStatus(_paused && _wanted is not null ? "Paused from the notification-area icon (Pause hotkey)." : string.Empty);
+            return _wanted is null || _suspended || _paused;
         }
 
         if (TryRegister(wanted)) return true;
@@ -122,7 +137,7 @@ public sealed class GlobalHotkey : IDisposable
         }
         if (msg == WM_TIMER && wParam.ToInt32() == RetryTimerId)
         {
-            if (_registered is null && !_suspended && _wanted is { IsValid: true } wanted) TryRegister(wanted);
+            if (_registered is null && !_suspended && !_paused && _wanted is { IsValid: true } wanted) TryRegister(wanted);
             else KillTimer(_hwnd, RetryTimerId);
             return IntPtr.Zero;
         }
