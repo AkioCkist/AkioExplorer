@@ -32,6 +32,47 @@ public sealed partial class SettingsView : UserControl
 
     private void OnResetDownloadFolder(object sender, RoutedEventArgs e) => ViewModel.SetDownloadFolder(null);
 
+    // ------------------------------------------------------------------ quick search hotkey box
+
+    private void OnHotkeyFocus(object sender, RoutedEventArgs e) => ViewModel.BeginHotkeyEdit();
+
+    private void OnHotkeyBlur(object sender, RoutedEventArgs e)
+    {
+        ViewModel.QuickSearchHotkey = HotkeyBox.Text; // the TwoWay binding may not have pushed it yet
+        ViewModel.EndHotkeyEdit();
+    }
+
+    /// <summary>A key pressed with Ctrl / Alt / Win becomes the hotkey; plain typing edits the text.</summary>
+    private void OnHotkeyKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        static bool Down(Windows.System.VirtualKey key) =>
+            Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            ViewModel.QuickSearchHotkey = HotkeyBox.Text;
+            ViewModel.EndHotkeyEdit();
+            ViewModel.BeginHotkeyEdit();
+            HotkeyBox.SelectAll();
+            e.Handled = true;
+            return;
+        }
+
+        var modifiers = HotkeyModifiers.None;
+        if (Down(Windows.System.VirtualKey.Control)) modifiers |= HotkeyModifiers.Ctrl;
+        if (Down(Windows.System.VirtualKey.Menu)) modifiers |= HotkeyModifiers.Alt;
+        if (Down(Windows.System.VirtualKey.LeftWindows) || Down(Windows.System.VirtualKey.RightWindows)) modifiers |= HotkeyModifiers.Win;
+        if ((modifiers & (HotkeyModifiers.Ctrl | HotkeyModifiers.Alt | HotkeyModifiers.Win)) == 0) return;
+        if (Down(Windows.System.VirtualKey.Shift)) modifiers |= HotkeyModifiers.Shift;
+
+        var gesture = new HotkeyGesture(modifiers, (int)e.Key);
+        if (!gesture.IsValid) return; // only modifiers so far
+        HotkeyBox.Text = gesture.ToString();
+        HotkeyBox.Select(HotkeyBox.Text.Length, 0);
+        ViewModel.QuickSearchHotkey = gesture.ToString();
+        e.Handled = true;
+    }
+
     private async void OnAddAccount(object sender, RoutedEventArgs e) => await Shell.AddCloudAccountFromSettingsAsync();
 
     private async void OnRenameAccount(object sender, RoutedEventArgs e)

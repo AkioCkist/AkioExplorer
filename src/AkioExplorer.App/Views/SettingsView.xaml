@@ -180,6 +180,18 @@
                             <x:String>The current tab</x:String>
                         </ComboBox>
                     </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE721;" Header="Quick search hotkey"
+                                         Description="Press the hotkey anywhere in Windows to search apps, files, folders and the web. Files come from the Everything index (voidtools), so Everything must be running. Turns on Keep running in the background.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.QuickSearchEnabled, Mode=TwoWay}" AutomationProperties.Name="Quick search hotkey" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE765;" Header="Hotkey" Description="Click the box and press the keys (for example Alt+Space or Ctrl+Alt+K), or type them. Needs Ctrl, Alt or Win.">
+                        <TextBox x:Name="HotkeyBox" MinWidth="200" Text="{x:Bind ViewModel.QuickSearchHotkey, Mode=TwoWay}"
+                                 IsEnabled="{x:Bind ViewModel.QuickSearchEnabled, Mode=OneWay}"
+                                 GotFocus="OnHotkeyFocus" LostFocus="OnHotkeyBlur" PreviewKeyDown="OnHotkeyKeyDown"
+                                 AutomationProperties.Name="Quick search hotkey keys" />
+                    </controls:SettingRow>
+                    <TextBlock Text="{x:Bind ViewModel.QuickSearchStatus, Mode=OneWay}" TextWrapping="Wrap" Margin="4,0,0,4"
+                               Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                     <controls:SettingRow Glyph="&#xE7E8;" Header="Keep running in the background" Description="Closing the window keeps AkioExplorer in the notification area, so the next folder opens instantly. Exit from the icon's menu.">
                         <ToggleSwitch IsOn="{x:Bind ViewModel.KeepRunningInBackground, Mode=TwoWay}" AutomationProperties.Name="Keep running in the background" />
                     </controls:SettingRow>

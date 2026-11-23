@@ -387,6 +387,10 @@ public sealed class WebDavProvider : RemotePathProvider, IDirectDownloadProvider
     private StorageException Map(HttpStatusCode status, string path, bool mkcol) => (int)status switch
     {
         401 => SignInFailed(),
+        // 402 Payment Required: the sign-in worked, but the service won't serve WebDAV on this account's plan.
+        402 => new StorageException(StorageErrorKind.NotSupported,
+            $"{ServiceName} accepted the sign-in but refused WebDAV access for this account (402 Payment Required). " +
+            $"{ServiceName} may only allow WebDAV on a paid plan."),
         403 => Denied(path),
         404 => NotFound(path),
         405 when mkcol => Exists(path),

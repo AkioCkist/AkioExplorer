@@ -149,7 +149,11 @@ public class SearchQueryTests
         System.IO.File.WriteAllText(Path.Combine(root, "sub", "c.txt"), "x");
         try
         {
-            var provider = new LocalStorageProvider(new KnownFoldersService(), NullLogger<LocalStorageProvider>.Instance);
+            // Files made a moment ago may not be in Everything's index yet: test the walker.
+            var provider = new LocalStorageProvider(new KnownFoldersService(), NullLogger<LocalStorageProvider>.Instance)
+            {
+                UseEverythingIndex = false,
+            };
             var names = new List<string>();
             await foreach (var item in provider.SearchAsync(root, new SearchQuery { Category = FileCategory.Image }, CancellationToken.None))
                 names.Add(item.Name);

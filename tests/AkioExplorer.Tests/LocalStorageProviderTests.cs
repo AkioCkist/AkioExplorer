@@ -89,6 +89,7 @@ public sealed class LocalStorageProviderTests : IDisposable
     [Fact]
     public async Task Search_is_recursive()
     {
+        _provider.UseEverythingIndex = false; // a file made a moment ago may not be in Everything's index yet
         var results = new List<StorageItem>();
         await foreach (var item in _provider.SearchAsync(_root, new SearchQuery { Name = "match" }, CancellationToken.None)) results.Add(item);
         Assert.Single(results);

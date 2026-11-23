@@ -50,7 +50,7 @@ public static class WebDavServices
 
         new(CloudProviderType.Yandex, "Yandex Disk", CloudCategory.Popular,
             [User("Yandex login"),
-             Password("App password", "Yandex ID → Security → App passwords → Files (WebDAV).")],
+             Password("App password", "Not your Yandex password: create one at Yandex ID → Security → App passwords → Files (WebDAV). It is 16 lowercase letters.")],
             _ => "https://webdav.yandex.com",
             "Login and app password", "yandex disk"),
     ];

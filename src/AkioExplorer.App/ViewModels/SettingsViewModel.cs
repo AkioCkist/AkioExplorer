@@ -55,17 +55,29 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _onPath;
     [ObservableProperty] private string _integrationMessage = string.Empty;
 
+    // Quick search
+    [ObservableProperty] private bool _quickSearchEnabled;
+    [ObservableProperty] private string _quickSearchHotkey = string.Empty;
+    [ObservableProperty] private string _quickSearchStatus = string.Empty;
+    private readonly GlobalHotkey _hotkey;
+
     private readonly IShellMenuService _shellMenus;
     private readonly ShellIntegration _integration = new();
     private IReadOnlyList<CodeEditor> _editors = [];
     private bool _loadingIntegration;
 
-    public SettingsViewModel(ISettingsService settings, ThemeService theme, FavoritesService favorites, IShellMenuService shellMenus)
+    public SettingsViewModel(ISettingsService settings, ThemeService theme, FavoritesService favorites, IShellMenuService shellMenus,
+        GlobalHotkey hotkey)
     {
         _settings = settings;
         _theme = theme;
         _favorites = favorites;
         _shellMenus = shellMenus;
+        _hotkey = hotkey;
+        _quickSearchEnabled = settings.Current.QuickSearchEnabled;
+        _quickSearchHotkey = settings.Current.QuickSearchHotkey;
+        _quickSearchStatus = hotkey.Status;
+        hotkey.StatusChanged += (_, _) => QuickSearchStatus = hotkey.Status;
 
         var s = settings.Current;
         _themeIndex = (int)s.Theme;
@@ -205,6 +217,32 @@ public sealed partial class SettingsViewModel : ObservableObject
     }, value ? "AkioExplorer starts hidden in the notification area when you sign in." : "AkioExplorer no longer starts with Windows.");
 
     partial void OnKeepRunningInBackgroundChanged(bool value) => Set(x => x.KeepRunningInBackground = value, notify: true);
+
+    partial void OnQuickSearchEnabledChanged(bool value)
+    {
+        Set(x => x.QuickSearchEnabled = value, notify: true);
+        if (value && !KeepRunningInBackground) KeepRunningInBackground = true; // the hotkey only works while we run
+    }
+
+    /// <summary>The hotkey box got focus: let keys through to it instead of opening the popup.</summary>
+    public void BeginHotkeyEdit() => _hotkey.Suspend();
+
+    /// <summary>
+    /// The hotkey box lost focus: keep the new hotkey when it parses ("Ctrl+Alt+K"), otherwise go back to the old one.
+    /// </summary>
+    public void EndHotkeyEdit()
+    {
+        if (HotkeyGesture.TryParse(QuickSearchHotkey, out var gesture))
+        {
+            QuickSearchHotkey = gesture.ToString();
+            Set(x => x.QuickSearchHotkey = gesture.ToString(), notify: true);
+        }
+        else
+        {
+            QuickSearchHotkey = _settings.Current.QuickSearchHotkey;
+        }
+        _hotkey.Resume();
+    }
 
     partial void OnExternalOpenIndexChanged(int value) => Set(x => x.ExternalOpenTarget = (ExternalOpenTarget)Math.Clamp(value, 0, 1));
 

@@ -18,11 +18,13 @@ public sealed class TrayIcon : IDisposable
     private const uint NIM_ADD = 0, NIM_DELETE = 2, NIM_SETVERSION = 4;
     private const uint NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4;
     private const uint TPM_RETURNCMD = 0x0100, TPM_RIGHTBUTTON = 0x0002;
-    private const int CmdOpen = 1, CmdExit = 2;
+    private const int CmdOpen = 1, CmdExit = 2, CmdQuickSearch = 3;
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
     private readonly Action _open;
     private readonly Action _exit;
+    private readonly Action? _quickSearch;
+    private readonly Func<string?>? _quickSearchKeys;
     private readonly WndProc _proc; // kept alive: native code calls it
     private readonly uint _taskbarCreated;
     private readonly string _className = "AkioExplorerTray" + Environment.ProcessId;
@@ -30,10 +32,14 @@ public sealed class TrayIcon : IDisposable
     private IntPtr _icon;
     private bool _added;
 
-    public TrayIcon(Action open, Action exit)
+    /// <param name="quickSearch">Opens the quick-search popup (menu item shown when given).</param>
+    /// <param name="quickSearchKeys">Its current hotkey for the menu label, or null when none works.</param>
+    public TrayIcon(Action open, Action exit, Action? quickSearch = null, Func<string?>? quickSearchKeys = null)
     {
         _open = open;
         _exit = exit;
+        _quickSearch = quickSearch;
+        _quickSearchKeys = quickSearchKeys;
         _proc = WindowProc;
         _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
 
@@ -113,6 +119,8 @@ public sealed class TrayIcon : IDisposable
     {
         IntPtr menu = CreatePopupMenu();
         AppendMenu(menu, 0, CmdOpen, "Open AkioExplorer");
+        if (_quickSearch is not null)
+            AppendMenu(menu, 0, CmdQuickSearch, _quickSearchKeys?.Invoke() is { Length: > 0 } keys ? "Quick search	" + keys : "Quick search");
         AppendMenu(menu, 0x800 /* MF_SEPARATOR */, 0, null);
         AppendMenu(menu, 0, CmdExit, "Exit");
         SetMenuDefaultItem(menu, CmdOpen, false);
@@ -122,6 +130,7 @@ public sealed class TrayIcon : IDisposable
         DestroyMenu(menu);
         if (cmd == CmdOpen) _open();
         else if (cmd == CmdExit) _exit();
+        else if (cmd == CmdQuickSearch) _quickSearch?.Invoke();
     }
 
     public void Dispose()

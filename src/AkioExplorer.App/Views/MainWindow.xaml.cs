@@ -33,6 +33,9 @@ public sealed partial class MainWindow : Window
     private bool _ready;
     private bool _syncingNav;
     private TrayIcon? _tray;
+    private GlobalHotkey? _hotkey;
+    private QuickSearchWindow? _quickSearch;
+    private string? _appliedHotkey;
     private bool _exitRequested;
     private LaunchRequest? _pendingLaunch;
 
@@ -99,6 +102,7 @@ public sealed partial class MainWindow : Window
         _settings.Changed += (_, _) => DispatcherQueue.TryEnqueue(OnIntegrationSettingsChanged);
         if (_settings.Current.KeepRunningInBackground) EnsureTray();
         ApplyBackdrop();
+        InitQuickSearch();
     }
 
     public MainViewModel ViewModel { get; }
@@ -120,6 +124,9 @@ public sealed partial class MainWindow : Window
             await OpenExternalAsync(pending.Path!);
         }
         _ = WarmUpShellMenusAsync();
+        // Build the (hidden) quick-search popup now, so the first hotkey press shows it at once.
+        if (_settings.Current.QuickSearchEnabled)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => EnsureQuickSearch());
     }
 
     // ------------------------------------------------------------------ launches from outside, background mode
@@ -161,7 +168,7 @@ public sealed partial class MainWindow : Window
 
     private void EnsureTray()
     {
-        _tray ??= new TrayIcon(ShowAndActivate, ExitApp);
+        _tray ??= new TrayIcon(ShowAndActivate, ExitApp, ToggleQuickSearch, () => _hotkey?.Active?.ToString());
         _tray.Show();
     }
 
@@ -177,7 +184,39 @@ public sealed partial class MainWindow : Window
         if (_settings.Current.KeepRunningInBackground) EnsureTray();
         else _tray?.Hide();
         ApplyBackdrop();
+        ApplyQuickSearchHotkey();
     }
+
+    // ------------------------------------------------------------------ quick search (launcher popup)
+
+    private void InitQuickSearch()
+    {
+        _hotkey = App.Services.GetRequiredService<GlobalHotkey>();
+        _hotkey.Pressed += (_, _) => ToggleQuickSearch();
+        ApplyQuickSearchHotkey();
+    }
+
+    private void ApplyQuickSearchHotkey()
+    {
+        if (_hotkey is null) return;
+        var s = _settings.Current;
+        string? wanted = s.QuickSearchEnabled ? s.QuickSearchHotkey : null;
+        if (wanted == _appliedHotkey) return;
+        _appliedHotkey = wanted;
+        bool ok = _hotkey.Set(wanted is not null && HotkeyGesture.TryParse(wanted, out var gesture) ? gesture : null);
+        if (!ok) _logger.LogWarning("Quick search hotkey {Hotkey}: {Status}", wanted, _hotkey.Status);
+    }
+
+    private QuickSearchWindow EnsureQuickSearch()
+    {
+        if (_quickSearch is not null) return _quickSearch;
+        _quickSearch = App.Services.GetRequiredService<QuickSearchWindow>();
+        _quickSearch.ViewModel.ShowInExplorer = path => HandleLaunch(new LaunchRequest(path, false));
+        _quickSearch.ViewModel.Prepare(); // app list ready before the first hotkey press
+        return _quickSearch;
+    }
+
+    private void ToggleQuickSearch() => EnsureQuickSearch().Toggle();
 
     private WindowBackdrop _appliedBackdrop = WindowBackdrop.Mica; // MainWindow.xaml starts with Mica
 
@@ -253,6 +292,9 @@ public sealed partial class MainWindow : Window
         }
         _tray?.Dispose();
         _tray = null;
+        _quickSearch?.CloseForExit(); // a hidden popup would otherwise keep the process alive
+        _quickSearch = null;
+        _hotkey?.Dispose();
         // Jobs still running are kept as "Interrupted" in Recent transfers so they can be retried next time.
         if (App.Services.GetService(typeof(Infrastructure.Settings.JsonTransferHistory)) is Infrastructure.Settings.JsonTransferHistory history)
             history.RecordInterrupted();

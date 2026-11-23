@@ -101,7 +101,7 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
         }
     }
 
-    private static StorageItem ToItem(ref FileSystemEntry entry)
+    internal static StorageItem ToItem(ref FileSystemEntry entry)
     {
         var attributes = entry.Attributes;
         bool isDirectory = entry.IsDirectory;
@@ -117,7 +117,7 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
         };
     }
 
-    private static StorageItemAttributes MapAttributes(FileAttributes a)
+    internal static StorageItemAttributes MapAttributes(FileAttributes a)
     {
         var result = StorageItemAttributes.None;
         if ((a & FileAttributes.Hidden) != 0) result |= StorageItemAttributes.Hidden;
@@ -496,49 +496,38 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
 
     // ---------------------------------------------------------------- search
 
+    /// <summary>
+    /// Use a running Everything's index when possible (see <see cref="LocalSearch"/>). Off = always walk the disk.
+    /// </summary>
+    public bool UseEverythingIndex { get; set; } = true;
+
     public async IAsyncEnumerable<StorageItem> SearchAsync(string path, SearchQuery query, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (!query.HasCriteria) yield break;
 
+        bool everywhere = IsRoot(path);
+        if (!everywhere && !Directory.Exists(path)) throw MapException(new DirectoryNotFoundException(path), path);
+
         var matcher = query.CreateMatcher(DateTimeOffset.Now);
-        string name = query.NameText;
-        bool wildcard = query.HasWildcards;
-        var roots = IsRoot(path)
+        string[] roots = everywhere
             ? DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed).Select(d => d.Name).ToArray()
             : [path];
 
-        var channel = Channel.CreateBounded<StorageItem>(new BoundedChannelOptions(512) { SingleReader = true });
-        var options = new EnumerationOptions
-        {
-            RecurseSubdirectories = true,
-            IgnoreInaccessible = true,
-            AttributesToSkip = FileAttributes.System,
-            ReturnSpecialDirectories = false,
-        };
+        // Cancelled when the caller stops reading early, so the producer never blocks on a full channel.
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = stop.Token;
+        var channel = Channel.CreateBounded<StorageItem>(new BoundedChannelOptions(1024) { SingleReader = true });
+        bool useEverything = UseEverythingIndex;
 
         _ = Task.Run(() =>
         {
             try
             {
-                foreach (var root in roots)
+                LocalSearch.Run(roots, everywhere, query, matcher, useEverything, item =>
                 {
-                    var enumerable = new FileSystemEnumerable<StorageItem>(root, static (ref FileSystemEntry e) => ToItem(ref e), options)
-                    {
-                        // Cheap span check on the name first; the full matcher (type, date, size) only for candidates.
-                        ShouldIncludePredicate = (ref FileSystemEntry e) =>
-                            (name.Length == 0 || (wildcard
-                                ? FileSystemName.MatchesSimpleExpression(name, e.FileName, ignoreCase: true)
-                                : e.FileName.Contains(name, StringComparison.OrdinalIgnoreCase))) &&
-                            matcher.Matches(e.FileName.ToString(), e.IsDirectory, e.IsDirectory ? null : e.Length, e.LastWriteTimeUtc),
-                        ShouldRecursePredicate = static (ref FileSystemEntry e) => (e.Attributes & FileAttributes.ReparsePoint) == 0,
-                    };
-
-                    foreach (var item in enumerable)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        channel.Writer.WriteAsync(item, cancellationToken).AsTask().GetAwaiter().GetResult();
-                    }
-                }
+                    channel.Writer.WriteAsync(item, token).AsTask().GetAwaiter().GetResult();
+                    return true;
+                }, _logger, token);
                 channel.Writer.Complete();
             }
             catch (Exception ex)
@@ -547,8 +536,15 @@ public sealed class LocalStorageProvider : IStorageProvider, IFileContentProvide
             }
         }, CancellationToken.None);
 
-        await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            yield return item;
+        try
+        {
+            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                yield return item;
+        }
+        finally
+        {
+            stop.Cancel();
+        }
     }
 
     // ---------------------------------------------------------------- paths

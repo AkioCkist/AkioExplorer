@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="AkioExplorer.App.Views.QuickSearchWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:AkioExplorer.App.ViewModels"
+    Title="AkioExplorer Quick search">
+
+    <Grid x:Name="Root" KeyboardAcceleratorPlacementMode="Hidden">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Search box: the ghost text behind it shows the rest of the selected name (Tab accepts). -->
+        <Grid Padding="22,0,18,0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="GhostText" FontSize="22" VerticalAlignment="Center" IsHitTestVisible="False" TextWrapping="NoWrap"
+                       TextTrimming="Clip" AutomationProperties.AccessibilityView="Raw">
+                <Run x:Name="GhostTyped" Foreground="Transparent" /><Run x:Name="GhostRest" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </TextBlock>
+            <TextBox x:Name="QueryBox" FontSize="22" Padding="0" MinHeight="0" BorderThickness="0" Background="Transparent"
+                     VerticalAlignment="Center" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False"
+                     PlaceholderText="Search apps, files, folders and the web"
+                     Text="{x:Bind ViewModel.Query, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     PreviewKeyDown="OnQueryKeyDown" AutomationProperties.Name="Quick search">
+                <TextBox.Resources>
+                    <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                    <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                </TextBox.Resources>
+            </TextBox>
+            <FontIcon Grid.Column="1" Glyph="&#xE721;" FontSize="18" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Grid>
+
+        <Rectangle x:Name="Divider" Grid.Row="1" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Visibility="Collapsed" />
+
+        <ListView x:Name="ResultsList" Grid.Row="2" Padding="6,6,6,6" SelectionMode="Single" IsItemClickEnabled="True" IsTabStop="False"
+                  ItemsSource="{x:Bind ViewModel.Results}" SelectedIndex="{x:Bind ViewModel.SelectedIndex, Mode=TwoWay}"
+                  ItemClick="OnResultClick" RightTapped="OnResultsRightTapped" ContainerContentChanging="OnContainerContentChanging"
+                  AutomationProperties.Name="Results">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                    <Setter Property="MinHeight" Value="56" />
+                    <Setter Property="Height" Value="56" />
+                    <Setter Property="Margin" Value="0,1,0,1" />
+                    <Setter Property="Padding" Value="12,0,12,0" />
+                    <Setter Property="IsTabStop" Value="False" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:QuickSearchResult">
+                    <Grid ColumnSpacing="14" Background="Transparent">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="32" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="{x:Bind Glyph}" FontSize="22" Visibility="{x:Bind GlyphVisibility, Mode=OneWay}" />
+                        <Image Source="{x:Bind Icon, Mode=OneWay}" Width="32" Height="32" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                            <TextBlock Text="{x:Bind Title}" FontSize="15" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            <TextBlock Text="{x:Bind Subtitle}" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="2" Text="{x:Bind Shortcut, Mode=OneWay}" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Window>

@@ -168,4 +168,14 @@ public sealed class AppSettings
     /// <summary>Closing the window keeps AkioExplorer in the notification area, so it reopens instantly.</summary>
     public bool KeepRunningInBackground { get; set; }
     public ExternalOpenTarget ExternalOpenTarget { get; set; } = ExternalOpenTarget.NewTab;
+
+    // ---- Quick search (launcher popup)
+    /// <summary>A global hotkey opens a search box over any app: apps, files and folders (Everything index), web.</summary>
+    public bool QuickSearchEnabled { get; set; } = true;
+
+    /// <summary>Hotkey as text, e.g. "Alt+Space" (<see cref="HotkeyGesture"/>).</summary>
+    public string QuickSearchHotkey { get; set; } = HotkeyGesture.Default.ToString();
+
+    /// <summary>How often each path was opened from quick search (ranks favourites first). Trimmed to the top 300.</summary>
+    public Dictionary<string, int> QuickSearchLaunches { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
