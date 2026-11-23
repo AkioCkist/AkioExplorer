@@ -13,6 +13,10 @@ public sealed class ShellIntegration
     public const string Verb = "AkioExplorer";
     private const string ExplorerVerb = "OpenInExplorer";
 
+    /// <summary>Command-line switch of the small process that takes Win+E (Windows ignores the registry for it).</summary>
+    public const string WinEAgentArgument = "--win-e-agent";
+    private const string WinEAgentRunValue = "AkioExplorerWinE";
+
     /// <summary>"This PC" — Win+E and "File Explorer" shortcuts run its opennewwindow verb.</summary>
     private const string ThisPcClsid = "{52205fd8-5dfb-447d-801a-d0b52f2e83e1}";
 
@@ -87,6 +91,11 @@ public sealed class ShellIntegration
             command.SetValue(null, Quote(exe));
             command.SetValue("DelegateExecute", string.Empty); // empty = run the command above, not the shell handler
             state.SetValue("Exe", exe);
+
+            // Recent Windows 11 builds open File Explorer on Win+E regardless of the key above: a small process
+            // started at sign-in takes the key instead.
+            using var run = Registry.CurrentUser.CreateSubKey(_runKey);
+            run.SetValue(WinEAgentRunValue, $"{Quote(exe)} {WinEAgentArgument}");
         }
         else
         {
@@ -111,8 +120,24 @@ public sealed class ShellIntegration
             }
             foreach (var name in new[] { "PrevDirectoryShell", "PrevDriveShell", "PrevThisPcCommand", "PrevThisPcDelegate", "CreatedExplorerVerb" })
                 state.DeleteValue(name, throwOnMissingValue: false);
+            using var run = Registry.CurrentUser.OpenSubKey(_runKey, writable: true);
+            run?.DeleteValue(WinEAgentRunValue, throwOnMissingValue: false);
         }
         NotifyShell();
+    }
+
+    /// <summary>
+    /// While AkioExplorer is the default file manager, makes sure the Win+E agent starts at sign-in for this exe
+    /// (setups made before the agent existed, or an exe that moved). Returns whether the agent is wanted.
+    /// </summary>
+    public bool EnsureWinEAgentAtSignIn(string exe)
+    {
+        if (!IsDefaultFileManager) return false;
+        string wanted = $"{Quote(exe)} {WinEAgentArgument}";
+        using var run = Registry.CurrentUser.CreateSubKey(_runKey);
+        if (!string.Equals(run.GetValue(WinEAgentRunValue) as string, wanted, StringComparison.OrdinalIgnoreCase))
+            run.SetValue(WinEAgentRunValue, wanted);
+        return true;
     }
 
     // ------------------------------------------------------------------ "Open in AkioExplorer"

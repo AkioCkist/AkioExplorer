@@ -15,9 +15,20 @@ public static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (WinEAgent.IsAgentLaunch(args))
+        {
+            WinEAgent.Run(); // tiny background process for Win+E; never loads XAML
+            return;
+        }
+
         StartupRequest = LaunchRequest.Parse(args, Environment.CurrentDirectory);
         if (SingleInstance.TryHandOff(StartupRequest)) return;
+        StartXaml();
+    }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void StartXaml()
+    {
         XamlCheckProcessRequirements();
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(p =>

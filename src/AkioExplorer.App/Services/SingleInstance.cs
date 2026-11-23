@@ -57,8 +57,8 @@ public sealed record LaunchRequest(string? Path, bool Background)
 public static class SingleInstance
 {
     // Stable per user and Windows session (string.GetHashCode is randomized per process, so it can't be used here).
-    private static readonly string Id = "AkioExplorer-" + new string(Environment.UserName.Where(char.IsLetterOrDigit).ToArray())
-                                        + "-" + System.Diagnostics.Process.GetCurrentProcess().SessionId;
+    internal static readonly string Id = "AkioExplorer-" + new string(Environment.UserName.Where(char.IsLetterOrDigit).ToArray())
+                                         + "-" + System.Diagnostics.Process.GetCurrentProcess().SessionId;
     private static readonly string MutexName = @"Local\" + Id;
     private static readonly string PipeName = Id + "-activate";
     private static Mutex? _mutex;
@@ -67,8 +67,19 @@ public static class SingleInstance
     public static bool TryHandOff(LaunchRequest request)
     {
         _mutex = new Mutex(initiallyOwned: true, MutexName, out bool created);
-        if (created) return false;
+        return !created && Send(request);
+    }
 
+    /// <summary>Hands <paramref name="request"/> to the running instance, if there is one (used by the Win+E agent).</summary>
+    public static bool TrySend(LaunchRequest request)
+    {
+        if (!Mutex.TryOpenExisting(MutexName, out var existing)) return false;
+        existing.Dispose();
+        return Send(request);
+    }
+
+    private static bool Send(LaunchRequest request)
+    {
         try
         {
             using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);

@@ -116,7 +116,25 @@ public sealed partial class MainWindow : Window
         if (_settings.Current.KeepRunningInBackground) EnsureTray();
         ApplyBackdrop();
         InitQuickSearch();
+        InitWinE();
     }
+
+    /// <summary>
+    /// Win+E opens AkioExplorer when it is the default file manager, even after it quits: Windows ignores the
+    /// registry override for the key itself, so a small separate process (<see cref="WinEAgent"/>) takes it.
+    /// </summary>
+    private static void InitWinE() => Task.Run(() =>
+    {
+        try
+        {
+            if (new AkioExplorer.Infrastructure.Shell.ShellIntegration().EnsureWinEAgentAtSignIn(AkioExplorer.Infrastructure.Shell.ShellIntegration.ExecutablePath))
+                WinEAgent.EnsureRunning();
+        }
+        catch (Exception)
+        {
+            // Registry locked down: Win+E stays with File Explorer, nothing else depends on it.
+        }
+    });
 
     public MainViewModel ViewModel { get; }
 
@@ -127,6 +145,7 @@ public sealed partial class MainWindow : Window
         _dialogs.XamlRoot = RootGrid.XamlRoot;
         if (_initialized) return;
         _initialized = true;
+        PlayEnterTransition();
 
         await ViewModel.InitializeAsync();
         LeftPaneView.FocusList();
@@ -178,10 +197,13 @@ public sealed partial class MainWindow : Window
 
     public void ShowAndActivate()
     {
+        bool minimized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+        bool appearing = !AppWindow.IsVisible || minimized; // already on screen (another folder opened): no replay
         AppWindow.Show();
-        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter) presenter.Restore();
+        if (minimized) ((OverlappedPresenter)AppWindow.Presenter).Restore();
         Activate();
         SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (appearing) PlayEnterTransition();
     }
 
     private void EnsureTray()
@@ -272,9 +294,11 @@ public sealed partial class MainWindow : Window
     /// raise AppWindow.Closing (only the system close button does), so the shutdown work runs here and the app is
     /// ended explicitly; otherwise the hidden quick-search and tray-menu windows keep the process alive.
     /// </summary>
-    private void ExitApp()
+    private async void ExitApp()
     {
+        if (_exitRequested) return;
         _exitRequested = true;
+        await PlayExitTransitionAsync();
         Shutdown();
         Application.Current.Exit();
     }
@@ -391,18 +415,20 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshDrivesAsync(); // pick up USB drives plugged in while away (throttled)
     }
 
-    private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    private async void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        if (!_exitRequested && _settings.Current.KeepRunningInBackground)
+        args.Cancel = true; // the content fades out first, then the window hides or the app quits
+        if (_exitRequested || !_settings.Current.KeepRunningInBackground)
         {
-            SaveSession();
-            // Stay alive in the notification area so the next Win+E / folder opens instantly.
-            args.Cancel = true;
-            EnsureTray();
-            AppWindow.Hide();
+            ExitApp();
             return;
         }
-        Shutdown();
+        // Stay alive in the notification area so the next Win+E / folder opens instantly.
+        SaveSession();
+        EnsureTray();
+        await PlayExitTransitionAsync();
+        AppWindow.Hide();
+        ResetTransition();
     }
 
     private void SaveSession()

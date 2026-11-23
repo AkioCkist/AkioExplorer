@@ -59,6 +59,31 @@ public sealed class ShellIntegrationTests : IDisposable
         Assert.Null(Read(@"Directory\shell\OpenInExplorer"));
     }
 
+    private static string? ReadRun(string name)
+    {
+        using var k = Registry.CurrentUser.OpenSubKey($@"{Root}\Run");
+        return k?.GetValue(name) as string;
+    }
+
+    [Fact]
+    public void Win_E_agent_starts_at_sign_in_only_while_default_file_manager()
+    {
+        Assert.False(_integration.EnsureWinEAgentAtSignIn(Exe));
+        Assert.Null(ReadRun("AkioExplorerWinE"));
+
+        _integration.SetDefaultFileManager(true, Exe);
+        Assert.Equal($"\"{Exe}\" --win-e-agent", ReadRun("AkioExplorerWinE"));
+
+        // Setups made before the agent existed get the entry back on the next start.
+        using (var run = Registry.CurrentUser.OpenSubKey($@"{Root}\Run", writable: true)) run!.DeleteValue("AkioExplorerWinE");
+        Assert.True(_integration.EnsureWinEAgentAtSignIn(Exe));
+        Assert.Equal($"\"{Exe}\" --win-e-agent", ReadRun("AkioExplorerWinE"));
+
+        _integration.SetDefaultFileManager(false, Exe);
+        Assert.Null(ReadRun("AkioExplorerWinE"));
+        Assert.False(_integration.IsAutostart); // the app's own autostart is a separate switch
+    }
+
     [Fact]
     public void Context_menu_and_autostart_toggle()
     {

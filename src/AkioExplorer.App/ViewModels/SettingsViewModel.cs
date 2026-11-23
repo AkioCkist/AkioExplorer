@@ -206,14 +206,26 @@ public sealed partial class SettingsViewModel : ObservableObject
         ReadIntegrationState();
     }
 
-    partial void OnReplaceFileExplorerChanged(bool value) => Integrate(
-        () => _integration.SetDefaultFileManager(value, ExecutablePath),
-        value ? "Folders, drives and Win+E now open AkioExplorer. \"Open in File Explorer\" stays in the Windows menu."
-              : "File Explorer (or your previous file manager) is back as the default.");
+    partial void OnReplaceFileExplorerChanged(bool value)
+    {
+        if (_loadingIntegration) return;
+        Integrate(
+            () => _integration.SetDefaultFileManager(value, ExecutablePath),
+            value ? "Folders, drives and Win+E now open AkioExplorer, also when it isn't running. \"Open in File Explorer\" stays in the Windows menu."
+                  : "File Explorer (or your previous file manager) is back as the default.");
+        // Win+E needs a small background process (Windows ignores the registry for the key); it outlives the app.
+        if (_integration.IsDefaultFileManager) WinEAgent.EnsureRunning();
+        else WinEAgent.Stop();
+    }
 
-    partial void OnContextMenuEntryChanged(bool value) => Integrate(
-        () => _integration.SetContextMenu(value, ExecutablePath),
-        value ? "\"Open in AkioExplorer\" added to the Windows right-click menu." : "\"Open in AkioExplorer\" removed.");
+    partial void OnContextMenuEntryChanged(bool value)
+    {
+        if (_loadingIntegration) return;
+        Integrate(
+            () => _integration.SetContextMenu(value, ExecutablePath),
+            value ? "\"Open in AkioExplorer\" added to the Windows right-click menu." : "\"Open in AkioExplorer\" removed.");
+        if (!_integration.IsDefaultFileManager) WinEAgent.Stop(); // removing the menu item also ends the replacement
+    }
 
     partial void OnStartWithWindowsChanged(bool value) => Integrate(() =>
     {
