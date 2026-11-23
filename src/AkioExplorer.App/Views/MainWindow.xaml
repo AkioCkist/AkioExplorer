@@ -19,48 +19,8 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- App-wide shortcuts (File Explorer conventions). List-scoped keys (Enter, Del, F2, Backspace) live in FilePane. -->
-        <Grid.KeyboardAccelerators>
-            <KeyboardAccelerator Modifiers="Menu" Key="Left" Invoked="OnBackAccelerator" />
-            <KeyboardAccelerator Modifiers="Menu" Key="Right" Invoked="OnForwardAccelerator" />
-            <KeyboardAccelerator Modifiers="Menu" Key="Up" Invoked="OnUpAccelerator" />
-            <KeyboardAccelerator Key="F5" Invoked="OnRefreshAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="R" Invoked="OnRefreshAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="L" Invoked="OnAddressAccelerator" />
-            <KeyboardAccelerator Modifiers="Menu" Key="D" Invoked="OnAddressAccelerator" />
-            <KeyboardAccelerator Key="F4" Invoked="OnAddressAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="F" Invoked="OnFilterAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="F" Invoked="OnAdvancedSearchAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="E" Invoked="OnFilterAccelerator" />
-            <KeyboardAccelerator Key="F3" Invoked="OnFilterAccelerator" />
-            <KeyboardAccelerator Key="F6" Invoked="OnSwitchPaneAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="N" Invoked="OnNewFolderAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="D" Invoked="OnDualPaneAccelerator" />
-            <KeyboardAccelerator Modifiers="Menu" Key="P" Invoked="OnPreviewAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="C" Invoked="OnCopyPathAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="Number6" Invoked="OnDetailsAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="Number2" Invoked="OnGridAccelerator" />
-            <KeyboardAccelerator Modifiers="Menu" Key="Enter" Invoked="OnPropertiesAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="Number1" Invoked="OnFocusSidebarAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="Z" Invoked="OnUndoAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="C" Invoked="OnCopyAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="X" Invoked="OnCutAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="V" Invoked="OnPasteAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="P" Invoked="OnPaletteAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="T" Invoked="OnNewTabAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="W" Invoked="OnCloseTabAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="T" Invoked="OnReopenTabAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="Tab" Invoked="OnNextTabAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="Tab" Invoked="OnPreviousTabAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="M" Invoked="OnBatchRenameAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="A" Invoked="OnSelectNoneAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="I" Invoked="OnInvertSelectionAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Menu" Key="N" Invoked="OnNewFileAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Menu" Key="S" Invoked="OnFolderSizesAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Menu" Key="T" Invoked="OnTerminalAccelerator" />
-            <KeyboardAccelerator Modifiers="Control,Shift" Key="E" Invoked="OnEditorAccelerator" />
-            <KeyboardAccelerator Modifiers="Control" Key="H" Invoked="OnHiddenItemsAccelerator" />
-        </Grid.KeyboardAccelerators>
+        <!-- App-wide shortcuts are added in code from ShortcutCatalog (the user can change them in Settings).
+             List-scoped keys (Enter, Del, F2, Backspace) live in FilePane. -->
 
         <!-- Custom title bar (draggable region) -->
         <Grid x:Name="AppTitleBar" Height="32" Padding="16,0,0,0" ColumnSpacing="10">

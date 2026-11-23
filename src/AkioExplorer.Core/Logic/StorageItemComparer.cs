@@ -1,3 +1,4 @@
+using System.Globalization;
 using AkioExplorer.Core.Models;
 
 namespace AkioExplorer.Core.Logic;
@@ -24,7 +25,50 @@ public sealed class StorageItemComparer : IComparer<StorageItem>
         if (ReferenceEquals(x, y)) return 0;
         if (x is null) return -1;
         if (y is null) return 1;
+        return CompareCore(x, y, 0, 0, typesRanked: false);
+    }
 
+    /// <summary>
+    /// Sorts <paramref name="rows"/> in this order. Sorting by type looks each item's type name up once and compares
+    /// precomputed ranks, instead of resolving and culture-comparing two type names on every comparison.
+    /// </summary>
+    public void Sort<T>(Span<T> rows, Func<T, StorageItem> itemOf)
+    {
+        if (rows.Length < 2) return;
+        if (_options.Field != SortField.Type)
+        {
+            rows.Sort((a, b) => Compare(itemOf(a), itemOf(b)));
+            return;
+        }
+
+        var keys = new TypeKey[rows.Length];
+        var ranks = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < rows.Length; i++)
+        {
+            var item = itemOf(rows[i]);
+            string type = TypeOf(item);
+            ranks.TryAdd(type, 0);
+            keys[i] = new TypeKey(item, type);
+        }
+
+        // Rank = position in culture order; names the culture calls equal share a rank, as string.Compare would.
+        var names = ranks.Keys.ToArray();
+        var culture = StringComparer.Create(CultureInfo.CurrentCulture, ignoreCase: true);
+        Array.Sort(names, culture);
+        int rank = 0;
+        for (int i = 0; i < names.Length; i++)
+        {
+            if (i > 0 && culture.Compare(names[i - 1], names[i]) != 0) rank++;
+            ranks[names[i]] = rank;
+        }
+        for (int i = 0; i < keys.Length; i++) keys[i] = keys[i] with { Rank = ranks[keys[i].Type] };
+
+        keys.AsSpan().Sort(rows, Comparer<TypeKey>.Create((a, b) =>
+            ReferenceEquals(a.Item, b.Item) ? 0 : CompareCore(a.Item, b.Item, a.Rank, b.Rank, typesRanked: true)));
+    }
+
+    private int CompareCore(StorageItem x, StorageItem y, int xTypeRank, int yTypeRank, bool typesRanked)
+    {
         if (_options.FoldersFirst)
         {
             int group = ((int)x.Kind).CompareTo((int)y.Kind);
@@ -35,7 +79,9 @@ public sealed class StorageItemComparer : IComparer<StorageItem>
         {
             SortField.Size => Nullable.Compare(x.Size ?? x.TotalSize, y.Size ?? y.TotalSize),
             SortField.Modified => Nullable.Compare(x.Modified, y.Modified),
-            SortField.Type => string.Compare(TypeOf(x), TypeOf(y), StringComparison.CurrentCultureIgnoreCase),
+            SortField.Type => typesRanked
+                ? xTypeRank.CompareTo(yTypeRank)
+                : string.Compare(TypeOf(x), TypeOf(y), StringComparison.CurrentCultureIgnoreCase),
             _ => 0,
         };
 
@@ -45,4 +91,6 @@ public sealed class StorageItemComparer : IComparer<StorageItem>
 
     private string TypeOf(StorageItem item) =>
         _typeNameResolver?.Invoke(item) ?? item.TypeDescription ?? item.Extension;
+
+    private readonly record struct TypeKey(StorageItem Item, string Type, int Rank = 0);
 }

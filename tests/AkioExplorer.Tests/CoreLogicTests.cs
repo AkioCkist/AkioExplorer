@@ -63,6 +63,29 @@ public class StorageItemComparerTests
         var byName = items.Order(new StorageItemComparer(new SortOptions(SortField.Name, FoldersFirst: false))).Select(i => i.Name);
         Assert.Equal(new[] { "new.txt", "old.txt", "Projects" }, byName);
     }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void Ranked_type_sort_matches_pairwise_comparison(bool descending, bool foldersFirst)
+    {
+        // "PNG File" and "png file" differ only in case: the ranked sort must treat them as one type, like Compare does.
+        static string TypeName(StorageItem i) => i.Kind == StorageItemKind.Folder ? "File folder"
+            : i.Extension switch { ".png" => "PNG File", ".PNG2" => "png file", ".txt" => "Text Document", _ => "File" };
+        var items = new[]
+        {
+            File("b.txt"), File("a.png"), Folder("Zeta"), File("c.PNG2"), File("a.txt"), File("noext"),
+            Folder("alpha"), File("b.png"), File("img10.txt"), File("img9.txt"), File("a.PNG2"),
+        };
+        var comparer = new StorageItemComparer(new SortOptions(SortField.Type, descending, foldersFirst), TypeName);
+
+        var expected = items.Order(comparer).Select(i => i.Name).ToArray();
+        var rows = items.ToArray();
+        comparer.Sort(rows.AsSpan(), i => i);
+
+        Assert.Equal(expected, rows.Select(i => i.Name).ToArray());
+    }
 }
 
 public class FileNameValidatorTests

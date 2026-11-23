@@ -37,6 +37,9 @@
                 <ListViewItem Tag="Menus">
                     <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE700;" FontSize="16" /><TextBlock Text="Menus and apps" /></StackPanel>
                 </ListViewItem>
+                <ListViewItem Tag="Shortcuts">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE765;" FontSize="16" /><TextBlock Text="Keyboard shortcuts" /></StackPanel>
+                </ListViewItem>
                 <ListViewItem Tag="Windows">
                     <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE782;" FontSize="16" /><TextBlock Text="Windows integration" /></StackPanel>
                 </ListViewItem>
@@ -48,6 +51,9 @@
                 </ListViewItem>
                 <ListViewItem Tag="Favorites">
                     <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE734;" FontSize="16" /><TextBlock Text="Favorites" /></StackPanel>
+                </ListViewItem>
+                <ListViewItem Tag="Backup">
+                    <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE777;" FontSize="16" /><TextBlock Text="Backup and reset" /></StackPanel>
                 </ListViewItem>
                 <ListViewItem Tag="About">
                     <StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE946;" FontSize="16" /><TextBlock Text="About" /></StackPanel>
@@ -289,6 +295,34 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                </StackPanel>
+
+                <!-- ============================================================ Keyboard shortcuts -->
+                <!-- One row per command is added in code (SettingsView.Shortcuts.cs), so "Find a setting" finds commands too. -->
+                <StackPanel x:Name="SectionShortcuts" Tag="Shortcuts" Spacing="4">
+                    <TextBlock Text="Keyboard shortcuts" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xE777;" Header="Reset all shortcuts" Description="Every command goes back to its default keys (File Explorer conventions). Click a key below to change it.">
+                        <Button Content="Reset all" Click="OnResetAllShortcuts" />
+                    </controls:SettingRow>
+                </StackPanel>
+
+                <!-- ============================================================ Backup and reset -->
+                <StackPanel x:Name="SectionBackup" Tag="Backup" Spacing="4">
+                    <TextBlock Text="Backup and reset" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,0,0,8" />
+                    <controls:SettingRow Glyph="&#xEDE1;" Header="Export settings" Description="Save your preferences, keyboard shortcuts and favorites to a .json file, to keep or to bring to another PC.">
+                        <Button Content="Export…" Click="OnExportSettings" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8B5;" Header="Import settings" Description="Load preferences from an exported file. Cloud accounts, open tabs and history on this PC stay as they are.">
+                        <Button Content="Import…" Click="OnImportSettings" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE72C;" Header="Reset to default settings" Description="Every preference and keyboard shortcut goes back to how AkioExplorer comes. Favorites, cloud accounts, open tabs and Windows integration stay.">
+                        <Button Content="Reset…" Click="OnResetSettings" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Glyph="&#xE8A5;" Header="Settings file" Description="{x:Bind ViewModel.SettingsFilePath}">
+                        <Button Content="Open folder" Command="{x:Bind ViewModel.OpenDataFolderCommand}" />
+                    </controls:SettingRow>
+                    <TextBlock Text="{x:Bind ViewModel.BackupMessage, Mode=OneWay}" TextWrapping="Wrap" Margin="4,4,0,0"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
                 <!-- ============================================================ About -->

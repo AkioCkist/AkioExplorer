@@ -530,6 +530,19 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         _settings.Save();
     }
 
+    /// <summary>Ranked higher because it was opened from quick search before (offer "Remove from suggestions").</summary>
+    public bool IsRemembered(QuickSearchResult result) =>
+        result.IsOnDisk && result.Path.Length > 0 &&
+        QuickSearchHistory.IsRemembered(_settings.Current.QuickSearchHistory, _settings.Current.QuickSearchLaunches, result.Path);
+
+    /// <summary>Forgets that <paramref name="result"/> was opened here, then searches again so the list re-ranks at once.</summary>
+    public void Forget(QuickSearchResult result)
+    {
+        if (!QuickSearchHistory.Forget(_settings.Current.QuickSearchHistory, _settings.Current.QuickSearchLaunches, result.Path)) return;
+        _settings.Save();
+        _ = SearchAsync(Query);
+    }
+
     private static bool LooksLikePath(string text) =>
         text.Length >= 2 && ((char.IsLetter(text[0]) && text[1] == ':') || text.StartsWith(@"\\", StringComparison.Ordinal));
 

@@ -172,6 +172,13 @@ public sealed class AppSettings
     public bool KeepRunningInBackground { get; set; }
     public ExternalOpenTarget ExternalOpenTarget { get; set; } = ExternalOpenTarget.NewTab;
 
+    // ---- Keyboard shortcuts
+    /// <summary>
+    /// Shortcuts the user changed: <see cref="ShortcutCatalog"/> command id → keys ("Ctrl+T"); an empty list = no key.
+    /// Commands not listed keep their defaults, so new defaults in later versions reach everyone else.
+    /// </summary>
+    public Dictionary<string, List<string>> Shortcuts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     // ---- Quick search (launcher popup)
     /// <summary>A global hotkey opens a search box over any app: apps, files and folders (Everything index), web.</summary>
     public bool QuickSearchEnabled { get; set; } = true;

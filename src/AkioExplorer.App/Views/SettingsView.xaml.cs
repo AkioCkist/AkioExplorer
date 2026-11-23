@@ -14,9 +14,9 @@ public sealed partial class SettingsView : UserControl
         Cloud = App.Services.GetRequiredService<CloudAccountsViewModel>();
         InitializeComponent();
         Loaded += async (_, _) => await Cloud.LoadQuotasAsync();
+        BuildShortcutRows();
         Categories.SelectedIndex = 0;
         ViewModel.Favorites.CollectionChanged += (_, _) => Bindings.Update();
-
     }
 
     public SettingsViewModel ViewModel { get; }
@@ -71,6 +71,30 @@ public sealed partial class SettingsView : UserControl
         HotkeyBox.Select(HotkeyBox.Text.Length, 0);
         ViewModel.QuickSearchHotkey = gesture.ToString();
         e.Handled = true;
+    }
+
+    // ------------------------------------------------------------------ backup and reset
+
+    private async void OnExportSettings(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.PickSaveFileAsync($"AkioExplorer settings {DateTime.Now:yyyy-MM-dd}", "Settings", ".json") is { } path)
+            await ViewModel.ExportSettingsAsync(path);
+    }
+
+    private async void OnImportSettings(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.PickOpenFileAsync(".json") is { } path) await ViewModel.ImportSettingsAsync(path);
+    }
+
+    private async void OnResetSettings(object sender, RoutedEventArgs e)
+    {
+        bool reset = await App.Services.GetRequiredService<Services.DialogService>().ConfirmAsync(
+            "Reset to default settings?",
+            "Every preference and keyboard shortcut goes back to how AkioExplorer comes. Favorites, cloud accounts, " +
+            "open tabs and Windows integration (default file manager, start with Windows) stay as they are.\n\n" +
+            "Tip: Export your settings first if you may want them back.",
+            "Reset");
+        if (reset) ViewModel.ResetSettings();
     }
 
     private async void OnAddAccount(object sender, RoutedEventArgs e) => await Shell.AddCloudAccountFromSettingsAsync();

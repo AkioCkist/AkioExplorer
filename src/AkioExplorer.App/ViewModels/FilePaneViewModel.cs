@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using AkioExplorer.App.Services;
 using AkioExplorer.Core.Abstractions;
 using AkioExplorer.Core.Logic;
@@ -33,6 +34,18 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 {
     private const int LoadingIndicatorDelayMs = 250;
     private const int WatchDebounceMs = 300;
+
+    /// <summary>
+    /// Longest a burst of watcher events may postpone the refresh: a long copy into the folder being shown keeps
+    /// restarting the debounce, and without a cap the list would stay stale until the copy ends.
+    /// </summary>
+    private const int WatchMaxDelayMs = 1500;
+
+    /// <summary>
+    /// Listings and re-sorts this large are sorted on a worker thread: culture-aware natural ordering costs a few
+    /// hundred milliseconds at 100 000 items, too long to hold the UI thread.
+    /// </summary>
+    private const int BackgroundSortThreshold = 5_000;
     private const int MaxSearchResults = 20_000;
 
     private readonly IStorageProviderRegistry _registry;
@@ -66,6 +79,18 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _searchCts;
     private IDisposable? _watcher;
     private int _loadVersion;
+
+    /// <summary>1 while a watcher event is queued to the UI thread; further events fold into it.</summary>
+    private int _watchQueued;
+
+    /// <summary><see cref="Environment.TickCount64"/> of the oldest change not yet refreshed (0 = none).</summary>
+    private long _watchPendingSince;
+    private bool _watchRefreshRunning;
+    private bool _watchRefreshAgain;
+
+    /// <summary>Bumped whenever <see cref="_all"/> is replaced or changed, so a background re-sort can tell it is stale.</summary>
+    private int _allVersion;
+    private int _resortVersion;
     private bool _suppressFilter;
     private SearchQuery _activeQuery = SearchQuery.Empty;
     private SearchMatcher? _viewMatcher;
@@ -110,7 +135,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _watchDebounce = dispatcher.CreateTimer();
         _watchDebounce.Interval = TimeSpan.FromMilliseconds(WatchDebounceMs);
         _watchDebounce.IsRepeating = false;
-        _watchDebounce.Tick += (_, _) => _ = RefreshSilentlyAsync();
+        _watchDebounce.Tick += (_, _) => _ = RefreshFromWatcherAsync();
 
         _loadingDelay = dispatcher.CreateTimer();
         _loadingDelay.Interval = TimeSpan.FromMilliseconds(LoadingIndicatorDelayMs);
@@ -334,21 +359,26 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
             if (version != _loadVersion) return;
 
+            // The first page was shown as it arrived; the full listing is put in order off the UI thread.
+            var listing = await PresortAsync(collected);
+            if (version != _loadVersion) return;
+
             if (!committed)
             {
                 Commit(provider, target, kind);
-                ApplyListing(collected, replace: true, focusPath: focus);
+                ApplyListing(listing, replace: true, focusPath: focus);
             }
             else if (fromCache || kind == NavigationKind.Refresh)
             {
-                ApplyListing(collected, replace: false);
+                ApplyListing(listing, replace: false, keepScroll: true);
             }
             else if (pages > 1)
             {
-                ApplyListing(collected, replace: true);
+                // The rest of a big folder arrived: the user may already be scrolling through the first page.
+                ApplyListing(listing, replace: true, keepScroll: true);
             }
 
-            _cache.Set(target, collected.ToArray());
+            _cache.Set(target, listing);
             StartAutoFolderSizes();
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -434,6 +464,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             foreach (var segment in provider.GetBreadcrumb(target.Path)) Breadcrumb.Add(segment);
 
             _watcher?.Dispose();
+            _watchDebounce.Stop();
+            _watchPendingSince = 0;
             _watcher = provider.Watch(target.Path, OnWatchedFolderChanged);
         }
 
@@ -450,12 +482,51 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     private void OnWatchedFolderChanged()
     {
-        // FileSystemWatcher thread → UI thread, debounced so a burst of changes costs one refresh.
+        // FileSystemWatcher thread. A copy into this folder raises thousands of Changed events a second: only one hop
+        // to the UI thread is ever queued, the events arriving meanwhile fold into it.
+        if (Interlocked.Exchange(ref _watchQueued, 1) == 1) return;
         _dispatcher.TryEnqueue(() =>
         {
+            Volatile.Write(ref _watchQueued, 0);
+
+            // Debounced so a burst costs one refresh, but never postponed past WatchMaxDelayMs.
+            long now = Environment.TickCount64;
+            if (_watchPendingSince == 0) _watchPendingSince = now;
+            else if (now - _watchPendingSince >= WatchMaxDelayMs)
+            {
+                if (!_watchDebounce.IsRunning) _watchDebounce.Start();
+                return;
+            }
+
             _watchDebounce.Stop();
             _watchDebounce.Start();
         });
+    }
+
+    /// <summary>Debounce tick. Refreshes never overlap: a change during a slow listing schedules one more.</summary>
+    private async Task RefreshFromWatcherAsync()
+    {
+        _watchPendingSince = 0;
+        if (_watchRefreshRunning)
+        {
+            _watchRefreshAgain = true;
+            return;
+        }
+
+        _watchRefreshRunning = true;
+        try
+        {
+            await RefreshSilentlyAsync();
+        }
+        finally
+        {
+            _watchRefreshRunning = false;
+            if (_watchRefreshAgain)
+            {
+                _watchRefreshAgain = false;
+                _watchDebounce.Start();
+            }
+        }
     }
 
     private async Task RefreshSilentlyAsync()
@@ -468,8 +539,10 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             var collected = new List<StorageItem>();
             await foreach (var page in provider.ListAsync(location.Path, ct)) collected.AddRange(page);
             if (version != _loadVersion || !location.Equals(Location)) return;
-            ApplyListing(collected, replace: false);
-            _cache.Set(location, collected.ToArray());
+            var listing = await PresortAsync(collected);
+            if (version != _loadVersion || !location.Equals(Location)) return;
+            ApplyListing(listing, replace: false, keepScroll: true);
+            _cache.Set(location, listing);
         }
         catch (OperationCanceledException)
         {
@@ -646,7 +719,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         ? $"{_shell.GetTypeName(item)} · {Formatting.FormatSize(total)}"
         : _shell.GetTypeName(item);
 
-    private void ApplyListing(IReadOnlyList<StorageItem> items, bool replace, string? focusPath = null)
+    /// <param name="keepScroll">Same folder re-listed: a list reset keeps the row at the top of the view in place.</param>
+    private void ApplyListing(IReadOnlyList<StorageItem> items, bool replace, string? focusPath = null, bool keepScroll = false)
     {
         var newAll = new List<FileItemViewModel>(items.Count);
         var newMap = new Dictionary<string, FileItemViewModel>(items.Count, StringComparer.OrdinalIgnoreCase);
@@ -670,8 +744,9 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
         SortList(newAll);
         _all = newAll;
+        _allVersion++;
         _byPath = newMap;
-        ApplyView(replace, fromRefresh: true);
+        ApplyView(replace, fromRefresh: true, keepScroll: keepScroll);
 
         if (focusPath is not null && newMap.TryGetValue(focusPath, out var focus))
             SelectionRequested?.Invoke(this, [focus]);
@@ -679,10 +754,45 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         TrySelectPending();
     }
 
+    private StorageItemComparer CreateComparer() =>
+        new(new SortOptions(SortField, SortDescending, FoldersFirst), _shell.GetTypeName);
+
     private void SortList(List<FileItemViewModel> list)
     {
-        var comparer = new StorageItemComparer(new SortOptions(SortField, SortDescending, FoldersFirst), _shell.GetTypeName);
-        list.Sort((a, b) => comparer.Compare(a.Item, b.Item));
+        var comparer = CreateComparer();
+        // Listings sorted by PresortAsync (and cached ones) arrive in order: a linear check is all the UI thread pays.
+        if (IsSorted(list, comparer)) return;
+        comparer.Sort(CollectionsMarshal.AsSpan(list), vm => vm.Item);
+    }
+
+    private static bool IsSorted(List<FileItemViewModel> list, StorageItemComparer comparer)
+    {
+        for (int i = 1; i < list.Count; i++)
+        {
+            if (comparer.Compare(list[i - 1].Item, list[i].Item) > 0) return false;
+        }
+        return true;
+    }
+
+    private void AddSorted(FileItemViewModel vm)
+    {
+        _all.Add(vm);
+        _allVersion++;
+        SortList(_all);
+    }
+
+    /// <summary>
+    /// Copies a fresh listing into an array, sorted on a worker thread when it is large, so <see cref="ApplyListing"/>
+    /// finds it already in order. Known folder sizes are applied first: sorting by size must see them.
+    /// </summary>
+    private async Task<StorageItem[]> PresortAsync(List<StorageItem> items)
+    {
+        var array = _folderSizes.Count == 0 ? items.ToArray() : items.ConvertAll(WithKnownFolderSize).ToArray();
+        if (array.Length < BackgroundSortThreshold) return array;
+
+        var comparer = CreateComparer();
+        await Task.Run(() => comparer.Sort(array.AsSpan(), item => item));
+        return array;
     }
 
     private bool IsShownBySettings(FileItemViewModel vm)
@@ -720,7 +830,8 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
     /// A re-listing (watcher, refresh, cached navigation): keep the scroll position with row-by-row updates unless
     /// most of the list changed. Otherwise the user changed what is shown (filter, chips, settings).
     /// </param>
-    private void ApplyView(bool replace, bool fromRefresh = false)
+    /// <param name="keepScroll">See <see cref="ApplyListing"/>.</param>
+    private void ApplyView(bool replace, bool fromRefresh = false, bool keepScroll = false)
     {
         if (IsSearchMode) return;
 
@@ -733,15 +844,19 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         if (replace)
         {
             var keep = KeptSelection(visible);
+            if (keepScroll) ListResetting?.Invoke(this, EventArgs.Empty);
             Items.ReplaceAll(visible);
             if (keep.Count > 0) SelectionRequested?.Invoke(this, keep);
+            if (keepScroll) ListReset?.Invoke(this, EventArgs.Empty);
         }
         else if (IsLargeChange(visible, fromRefresh ? Math.Max(MaxIncrementalChanges, Items.Count / 2) : MaxIncrementalChanges))
         {
             // Same rows kept selected, but without scrolling or taking focus (the user may be typing in the filter box).
             var keep = KeptSelection(visible);
+            if (keepScroll) ListResetting?.Invoke(this, EventArgs.Empty);
             Items.ReplaceAll(visible);
             if (keep.Count > 0) SelectionRestoreRequested?.Invoke(this, keep);
+            if (keepScroll) ListReset?.Invoke(this, EventArgs.Empty);
         }
         else
         {
@@ -774,6 +889,15 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     /// <summary>Asks the view to select these items again after a list reset, without scrolling or moving focus.</summary>
     public event EventHandler<IReadOnlyList<FileItemViewModel>>? SelectionRestoreRequested;
+
+    /// <summary>
+    /// Raised around a reset of <see cref="Items"/> that re-lists the folder being shown (rest of a big folder
+    /// arrived, refresh): the view notes its top visible row first and scrolls back to it after, instead of jumping.
+    /// </summary>
+    public event EventHandler? ListResetting;
+
+    /// <inheritdoc cref="ListResetting"/>
+    public event EventHandler? ListReset;
 
     /// <summary>Type / date / size filters also narrow the folder being browsed, so the chips always mean what they show.</summary>
     partial void OnSearchFiltersChanged(SearchQuery value)
@@ -814,6 +938,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
 
     private void Resort()
     {
+        int resort = ++_resortVersion; // drops any background re-sort still running for an older order
         if (IsSearchMode)
         {
             var results = Items.ToList();
@@ -822,7 +947,28 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             return;
         }
 
-        SortList(_all);
+        if (_all.Count < BackgroundSortThreshold)
+        {
+            SortList(_all);
+            ApplyView(replace: true);
+            return;
+        }
+
+        _ = ResortInBackgroundAsync(resort);
+    }
+
+    private async Task ResortInBackgroundAsync(int resort)
+    {
+        int allVersion = _allVersion;
+        var comparer = CreateComparer();
+        // Snapshot of the items: a folder size arriving meanwhile must not change a row's key mid-sort.
+        var rows = _all.Select(vm => (Item: vm.Item, Row: vm)).ToArray();
+        await Task.Run(() => comparer.Sort(rows.AsSpan(), r => r.Item));
+
+        if (resort != _resortVersion || IsSearchMode) return; // a newer sort order was picked meanwhile
+        if (allVersion == _allVersion) _all = rows.Select(r => r.Row).ToList();
+        else SortList(_all); // re-listed or edited meanwhile: sort what is there now (already in order after a re-listing)
+        _allVersion++;
         ApplyView(replace: true);
     }
 
@@ -1032,8 +1178,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             {
                 vm = CreateItem(item);
                 _byPath[item.Path] = vm;
-                _all.Add(vm);
-                SortList(_all);
+                AddSorted(vm);
             }
 
             ApplyView(replace: false);
@@ -1184,6 +1329,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
             _deleting.Add(t.Path);
         }
         _all = _all.Where(v => !gone.Contains(v)).ToList();
+        _allVersion++;
         _selected.Clear();
         Items.ReplaceAll(Items.Where(v => !gone.Contains(v)).ToList());
         if (location is not null) _cache.Invalidate(location);

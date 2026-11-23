@@ -177,7 +177,8 @@ public partial class App : Application
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
-        services.AddSingleton<GlobalHotkey>();        services.AddSingleton<QuickSearchViewModel>();
+        services.AddSingleton<GlobalHotkey>();
+        services.AddSingleton<ShortcutService>();        services.AddSingleton<QuickSearchViewModel>();
         services.AddSingleton<QuickSearchWindow>();
 
         return services.BuildServiceProvider();

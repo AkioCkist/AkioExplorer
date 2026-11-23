@@ -19,6 +19,9 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
     };
 
     private readonly StaWorker _worker = new("Shell icon worker");
+
+    /// <summary>System image lists by SHIL_* size; touched only on <see cref="_worker"/>, where they were created.</summary>
+    private readonly Dictionary<int, IImageList> _imageLists = new();
     private readonly ConcurrentDictionary<string, string> _typeNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<ShellIconExtractor> _logger;
 
@@ -78,9 +81,7 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
         if (result == IntPtr.Zero)
             return null;
 
-        var iid = IID_IImageList;
-        int list = size switch { IconSize.Jumbo => SHIL_JUMBO, IconSize.Large => SHIL_EXTRALARGE, _ => SHIL_LARGE };
-        if (SHGetImageList(list, ref iid, out var imageList) != 0 || imageList is null)
+        if (ImageList(size) is not { } imageList)
             return null;
 
         try
@@ -106,10 +107,21 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
             _logger.LogDebug(ex, "Icon extraction failed for {Path}", path);
             return null;
         }
-        finally
-        {
-            Marshal.ReleaseComObject(imageList);
-        }
+    }
+
+    /// <summary>
+    /// The system image list for <paramref name="size"/>, fetched once (worker thread only). It is one shared list per
+    /// process, so there is nothing to gain from asking the shell for it again on every icon.
+    /// </summary>
+    private IImageList? ImageList(IconSize size)
+    {
+        int list = size switch { IconSize.Jumbo => SHIL_JUMBO, IconSize.Large => SHIL_EXTRALARGE, _ => SHIL_LARGE };
+        if (_imageLists.TryGetValue(list, out var cached)) return cached;
+
+        var iid = IID_IImageList;
+        if (SHGetImageList(list, ref iid, out var imageList) != 0 || imageList is null) return null;
+        _imageLists[list] = imageList;
+        return imageList;
     }
 
     /// <summary>Largest x or y (exclusive) that holds a visible pixel.</summary>
@@ -200,5 +212,15 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
 
     private static bool IsLocalPath(string path) => path.Length >= 2 && (path[1] == ':' || path.StartsWith(@"\\", StringComparison.Ordinal));
 
-    public void Dispose() => _worker.Dispose();
+    public void Dispose()
+    {
+        // COM objects are released on the STA thread that created them.
+        _ = _worker.InvokeAsync(() =>
+        {
+            foreach (var imageList in _imageLists.Values) Marshal.ReleaseComObject(imageList);
+            _imageLists.Clear();
+            return true;
+        });
+        _worker.Dispose();
+    }
 }

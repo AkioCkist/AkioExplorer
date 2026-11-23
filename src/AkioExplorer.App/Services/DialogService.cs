@@ -1,3 +1,5 @@
+using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -7,6 +9,9 @@ namespace AkioExplorer.App.Services;
 public sealed class DialogService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ISettingsService _settings;
+
+    public DialogService(ISettingsService settings) => _settings = settings;
 
     public XamlRoot? XamlRoot { get; set; }
 
@@ -17,8 +22,23 @@ public sealed class DialogService
         try
         {
             dialog.XamlRoot = XamlRoot;
-            dialog.Style ??= (Style)Application.Current.Resources["DefaultContentDialogStyle"];
+            // Same material as the window: glass over Mica/Acrylic, the stock solid sheet when the user picked Solid.
+            dialog.Style ??= (Style)Application.Current.Resources[
+                _settings.Current.Backdrop == WindowBackdrop.Solid ? "DefaultContentDialogStyle" : "GlassContentDialogStyle"];
             dialog.RequestedTheme = (XamlRoot.Content as FrameworkElement)?.ActualTheme ?? ElementTheme.Default;
+
+            // ContentDialog's own content area never scrolls, so anything taller than the window was cut off.
+            // Every list inside a dialog has a fixed Height, so the content always has a finite natural height here.
+            if (dialog.Content is UIElement content and not ScrollViewer)
+            {
+                dialog.Content = new ScrollViewer
+                {
+                    Content = content,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    IsTabStop = false,
+                };
+            }
 
             // Dialogs are laid out for a roomy window; in a small one they shrink instead of being cut off.
             var sized = new List<(FrameworkElement Element, double Width, double MinWidth, double Height)>();

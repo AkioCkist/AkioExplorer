@@ -38,6 +38,13 @@ public sealed class FavoritesService
         if (match is not null) Remove(match);
     }
 
+    /// <summary>After a settings import or reset: show the favorites now in settings.</summary>
+    public void Reload()
+    {
+        Items.Clear();
+        foreach (var favorite in _settings.Current.Favorites) Items.Add(favorite);
+    }
+
     private void Persist()
     {
         _settings.Current.Favorites = Items.ToList();

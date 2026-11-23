@@ -153,8 +153,7 @@ public sealed partial class FilePaneViewModel
             {
                 vm = CreateItem(item);
                 _byPath[item.Path] = vm;
-                _all.Add(vm);
-                SortList(_all);
+                AddSorted(vm);
             }
             ApplyView(replace: false);
             _cache.Invalidate(Location);
@@ -318,8 +317,7 @@ public sealed partial class FilePaneViewModel
             {
                 vm = CreateItem(folder);
                 _byPath[folder.Path] = vm;
-                _all.Add(vm);
-                SortList(_all);
+                AddSorted(vm);
             }
             ApplyView(replace: false);
             _cache.Invalidate(Location);

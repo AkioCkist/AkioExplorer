@@ -78,6 +78,8 @@ public sealed partial class FilePane : UserControl
         {
             old.SelectionRequested -= pane.OnSelectionRequested;
             old.SelectionRestoreRequested -= pane.OnSelectionRestoreRequested;
+            old.ListResetting -= pane.OnListResetting;
+            old.ListReset -= pane.OnListReset;
             old.RenameRequested -= pane.OnRenameRequested;
             old.FocusListRequested -= pane.OnFocusListRequested;
             old.AddressEditRequested -= pane.OnAddressEditRequested;
@@ -91,6 +93,8 @@ public sealed partial class FilePane : UserControl
         {
             vm.SelectionRequested += pane.OnSelectionRequested;
             vm.SelectionRestoreRequested += pane.OnSelectionRestoreRequested;
+            vm.ListResetting += pane.OnListResetting;
+            vm.ListReset += pane.OnListReset;
             vm.RenameRequested += pane.OnRenameRequested;
             vm.FocusListRequested += pane.OnFocusListRequested;
             vm.AddressEditRequested += pane.OnAddressEditRequested;
@@ -188,6 +192,31 @@ public sealed partial class FilePane : UserControl
         if (ActiveList is not { } list || items.Count == 0) return;
         SelectInList(list, items);
         ViewModel.UpdateSelection(list.SelectedItems.OfType<FileItemViewModel>());
+    }
+
+    /// <summary>Row at the top of the view before a re-listing reset; null when the list was not scrolled.</summary>
+    private FileItemViewModel? _scrollAnchor;
+
+    private void OnListResetting(object? sender, EventArgs e)
+    {
+        _scrollAnchor = null;
+        if (ActiveList is not { } list) return;
+        int first = list.ItemsPanelRoot switch
+        {
+            ItemsStackPanel panel => panel.FirstVisibleIndex,
+            ItemsWrapGrid grid => grid.FirstVisibleIndex,
+            _ => -1,
+        };
+        // At the top the user should see the top of the new order, so only a scrolled list is anchored.
+        if (first > 0 && first < list.Items.Count) _scrollAnchor = list.Items[first] as FileItemViewModel;
+    }
+
+    private void OnListReset(object? sender, EventArgs e)
+    {
+        var anchor = _scrollAnchor;
+        _scrollAnchor = null;
+        if (anchor is null || ActiveList is not { } list || ViewModel?.Items.IndexOf(anchor) < 0) return;
+        list.ScrollIntoView(anchor, ScrollIntoViewAlignment.Leading);
     }
 
     private void SelectInList(ListViewBase list, IReadOnlyList<FileItemViewModel> items)

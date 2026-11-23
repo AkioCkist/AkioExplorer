@@ -5,7 +5,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:AkioExplorer.App.ViewModels"
     xmlns:models="using:AkioExplorer.Core.Models"
-    xmlns:conv="using:AkioExplorer.App.Converters">
+    xmlns:conv="using:AkioExplorer.App.Converters"
+    xmlns:controls="using:AkioExplorer.App.Controls">
 
     <UserControl.Resources>
         <!-- Details row: compiled bindings, no converters, icon loads when the row is realised. -->
@@ -103,14 +104,14 @@
 
         <FlyoutBase.AttachedFlyout>
             <MenuFlyout x:Name="BackgroundMenu">
-                <MenuFlyoutItem Text="Paste" Command="{x:Bind ViewModel.PasteCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+V">
+                <MenuFlyoutItem Text="Paste" Command="{x:Bind ViewModel.PasteCommand, Mode=OneWay}" controls:ShortcutText.Command="Paste">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE77F;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
                 <MenuFlyoutSubItem Text="View">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE890;" /></MenuFlyoutSubItem.Icon>
-                    <RadioMenuFlyoutItem x:Name="MenuViewDetails" Text="Details" GroupName="view" Click="OnMenuViewDetails" KeyboardAcceleratorTextOverride="Ctrl+Shift+6" />
-                    <RadioMenuFlyoutItem x:Name="MenuViewGrid" Text="Grid" GroupName="view" Click="OnMenuViewGrid" KeyboardAcceleratorTextOverride="Ctrl+Shift+2" />
+                    <RadioMenuFlyoutItem x:Name="MenuViewDetails" Text="Details" GroupName="view" Click="OnMenuViewDetails" controls:ShortcutText.Command="DetailsView" />
+                    <RadioMenuFlyoutItem x:Name="MenuViewGrid" Text="Grid" GroupName="view" Click="OnMenuViewGrid" controls:ShortcutText.Command="GridView" />
                 </MenuFlyoutSubItem>
                 <MenuFlyoutSubItem Text="Sort by">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8CB;" /></MenuFlyoutSubItem.Icon>
@@ -122,38 +123,38 @@
                     <RadioMenuFlyoutItem x:Name="MenuSortAsc" Text="Ascending" GroupName="dir" Click="OnMenuSortDirection" Tag="Asc" />
                     <RadioMenuFlyoutItem x:Name="MenuSortDesc" Text="Descending" GroupName="dir" Click="OnMenuSortDirection" Tag="Desc" />
                 </MenuFlyoutSubItem>
-                <MenuFlyoutItem Text="Refresh" Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F5">
+                <MenuFlyoutItem Text="Refresh" Command="{x:Bind ViewModel.RefreshCommand, Mode=OneWay}" controls:ShortcutText.Command="Refresh">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72C;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
                 <MenuFlyoutSubItem x:Name="MenuNew" Text="New">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutSubItem.Icon>
-                    <MenuFlyoutItem Text="Folder" Command="{x:Bind ViewModel.NewFolderCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+N">
+                    <MenuFlyoutItem Text="Folder" Command="{x:Bind ViewModel.NewFolderCommand, Mode=OneWay}" controls:ShortcutText.Command="NewFolder">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8F4;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem x:Name="MenuNewFile" Text="Text document" Command="{x:Bind ViewModel.NewTextFileCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+N">
+                    <MenuFlyoutItem x:Name="MenuNewFile" Text="Text document" Command="{x:Bind ViewModel.NewTextFileCommand, Mode=OneWay}" controls:ShortcutText.Command="NewFile">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <MenuFlyoutSeparator x:Name="MenuNewTabSeparator" />
-                    <MenuFlyoutItem Text="Tab" Command="{x:Bind ViewModel.NewTabCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+T">
+                    <MenuFlyoutItem Text="Tab" Command="{x:Bind ViewModel.NewTabCommand, Mode=OneWay}" controls:ShortcutText.Command="NewTab">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE737;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                 </MenuFlyoutSubItem>
                 <MenuFlyoutSubItem Text="Select">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE762;" /></MenuFlyoutSubItem.Icon>
                     <MenuFlyoutItem Text="Select all" Command="{x:Bind ViewModel.SelectAllCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+A" />
-                    <MenuFlyoutItem Text="Select none" Command="{x:Bind ViewModel.SelectNoneCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+A" />
-                    <MenuFlyoutItem Text="Invert selection" Command="{x:Bind ViewModel.InvertSelectionCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+I" />
+                    <MenuFlyoutItem Text="Select none" Command="{x:Bind ViewModel.SelectNoneCommand, Mode=OneWay}" controls:ShortcutText.Command="SelectNone" />
+                    <MenuFlyoutItem Text="Invert selection" Command="{x:Bind ViewModel.InvertSelectionCommand, Mode=OneWay}" controls:ShortcutText.Command="InvertSelection" />
                     <MenuFlyoutItem Text="Select by pattern…" Click="OnSelectByPattern" KeyboardAcceleratorTextOverride="Num +" />
                     <MenuFlyoutItem Text="Deselect by pattern…" Click="OnDeselectByPattern" KeyboardAcceleratorTextOverride="Num -" />
                 </MenuFlyoutSubItem>
                 <MenuFlyoutSeparator />
-                <MenuFlyoutItem x:Name="MenuBgEditor" Text="Open in VS Code" Command="{x:Bind ViewModel.OpenInEditorCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+E">
+                <MenuFlyoutItem x:Name="MenuBgEditor" Text="Open in VS Code" Command="{x:Bind ViewModel.OpenInEditorCommand, Mode=OneWay}" controls:ShortcutText.Command="Editor">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE943;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSubItem x:Name="MenuBgOpenIn" Text="Open in">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8A7;" /></MenuFlyoutSubItem.Icon>
-                    <MenuFlyoutItem x:Name="MenuBgTerminal" Text="Terminal" Command="{x:Bind ViewModel.OpenTerminalCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+T">
+                    <MenuFlyoutItem x:Name="MenuBgTerminal" Text="Terminal" Command="{x:Bind ViewModel.OpenTerminalCommand, Mode=OneWay}" controls:ShortcutText.Command="Terminal">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE756;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <MenuFlyoutItem x:Name="MenuBgBrowser" Text="Browser" Command="{x:Bind ViewModel.OpenInBrowserCommand, Mode=OneWay}">
@@ -174,13 +175,13 @@
                 <MenuFlyoutItem x:Name="MenuPinCurrent" Text="Pin to Favorites" Command="{x:Bind ViewModel.ToggleFavoriteCommand, Mode=OneWay}">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" controls:ShortcutText.Command="CopyPath">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem x:Name="MenuBgSizes" Text="Calculate folder sizes" Command="{x:Bind ViewModel.CalculateFolderSizesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+S">
+                <MenuFlyoutItem x:Name="MenuBgSizes" Text="Calculate folder sizes" Command="{x:Bind ViewModel.CalculateFolderSizesCommand, Mode=OneWay}" controls:ShortcutText.Command="FolderSizes">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEDA2;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
-                <MenuFlyoutItem x:Name="MenuBgProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Alt+Enter">
+                <MenuFlyoutItem x:Name="MenuBgProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" controls:ShortcutText.Command="Properties">
                     <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;" /></MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
             </MenuFlyout>
@@ -223,7 +224,7 @@
                         <TabViewItem.IconSource><FontIconSource Glyph="{x:Bind Glyph, Mode=OneWay}" /></TabViewItem.IconSource>
                         <TabViewItem.ContextFlyout>
                             <MenuFlyout>
-                                <MenuFlyoutItem Text="Close tab" Click="OnCloseTabMenu" KeyboardAcceleratorTextOverride="Ctrl+W" />
+                                <MenuFlyoutItem Text="Close tab" Click="OnCloseTabMenu" controls:ShortcutText.Command="CloseTab" />
                                 <MenuFlyoutItem Text="Close other tabs" Click="OnCloseOtherTabsMenu" />
                                 <MenuFlyoutItem Text="Duplicate tab" Click="OnDuplicateTabMenu" />
                             </MenuFlyout>
@@ -416,7 +417,7 @@
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE774;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <!-- Text and icon come from the preferred editor found on this PC (VS Code first). -->
-                    <MenuFlyoutItem x:Name="MenuOpenEditor" Text="Open in VS Code" Command="{x:Bind ViewModel.OpenInEditorCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+E">
+                    <MenuFlyoutItem x:Name="MenuOpenEditor" Text="Open in VS Code" Command="{x:Bind ViewModel.OpenInEditorCommand, Mode=OneWay}" controls:ShortcutText.Command="Editor">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE943;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <MenuFlyoutSubItem x:Name="MenuOpenWith" Text="Open with">
@@ -430,7 +431,7 @@
                         <MenuFlyoutItem x:Name="MenuOpenOther" Text="Other pane" Click="OnOpenInOtherPane">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A4;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <MenuFlyoutItem x:Name="MenuTerminal" Text="Terminal" Command="{x:Bind ViewModel.OpenTerminalCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+T">
+                        <MenuFlyoutItem x:Name="MenuTerminal" Text="Terminal" Command="{x:Bind ViewModel.OpenTerminalCommand, Mode=OneWay}" controls:ShortcutText.Command="Terminal">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE756;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <MenuFlyoutItem x:Name="MenuReveal" Text="File Explorer" Command="{x:Bind ViewModel.RevealInExplorerCommand, Mode=OneWay}">
@@ -438,13 +439,13 @@
                         </MenuFlyoutItem>
                     </MenuFlyoutSubItem>
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Cut" Command="{x:Bind ViewModel.CutCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+X">
+                    <MenuFlyoutItem Text="Cut" Command="{x:Bind ViewModel.CutCommand, Mode=OneWay}" controls:ShortcutText.Command="Cut">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C6;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem Text="Copy" Command="{x:Bind ViewModel.CopyCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+C">
+                    <MenuFlyoutItem Text="Copy" Command="{x:Bind ViewModel.CopyCommand, Mode=OneWay}" controls:ShortcutText.Command="Copy">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
+                    <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" controls:ShortcutText.Command="CopyPath">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                     <MenuFlyoutItem x:Name="MenuRename" Text="Rename" Command="{x:Bind ViewModel.RenameCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F2">
@@ -456,7 +457,7 @@
                     <MenuFlyoutSeparator />
                     <MenuFlyoutSubItem x:Name="MenuOrganize" Text="Organize">
                         <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE8FD;" /></MenuFlyoutSubItem.Icon>
-                        <MenuFlyoutItem x:Name="MenuBatchRename" Text="Rename many…" Command="{x:Bind ViewModel.BatchRenameCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+M">
+                        <MenuFlyoutItem x:Name="MenuBatchRename" Text="Rename many…" Command="{x:Bind ViewModel.BatchRenameCommand, Mode=OneWay}" controls:ShortcutText.Command="BatchRename">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AC;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <MenuFlyoutItem x:Name="MenuFolderFromSelection" Text="New folder from selection" Command="{x:Bind ViewModel.NewFolderFromSelectionCommand, Mode=OneWay}">
@@ -551,7 +552,7 @@
                         <MenuFlyoutItem x:Name="MenuChecksum" Text="Checksums (MD5, SHA)…" Command="{x:Bind ViewModel.ChecksumCommand, Mode=OneWay}">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72E;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <MenuFlyoutItem x:Name="MenuFolderSize" Text="Calculate size" Command="{x:Bind ViewModel.CalculateFolderSizesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Alt+S">
+                        <MenuFlyoutItem x:Name="MenuFolderSize" Text="Calculate size" Command="{x:Bind ViewModel.CalculateFolderSizesCommand, Mode=OneWay}" controls:ShortcutText.Command="FolderSizes">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xEDA2;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <MenuFlyoutItem Text="Select same type" Command="{x:Bind ViewModel.SelectSameTypeCommand, Mode=OneWay}">
@@ -562,7 +563,7 @@
                         <ToggleMenuFlyoutItem x:Name="MenuReadOnlyAttr" Text="Read-only" Command="{x:Bind ViewModel.ToggleReadOnlyAttributeCommand, Mode=OneWay}" />
                     </MenuFlyoutSubItem>
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem x:Name="MenuProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Alt+Enter">
+                    <MenuFlyoutItem x:Name="MenuProperties" Text="Properties" Command="{x:Bind ViewModel.ShowPropertiesCommand, Mode=OneWay}" controls:ShortcutText.Command="Properties">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE946;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
                 </MenuFlyout>

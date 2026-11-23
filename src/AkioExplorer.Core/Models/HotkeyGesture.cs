@@ -11,7 +11,10 @@ public enum HotkeyModifiers
     Win = 0x8,
 }
 
-/// <summary>A global hotkey such as "Alt+Space": modifiers plus one virtual-key code.</summary>
+/// <summary>
+/// A key combination such as "Alt+Space" or "Ctrl+Shift+N": modifiers plus one virtual-key code. Used for the global
+/// quick-search hotkey (<see cref="IsValid"/>) and for in-app shortcuts (<see cref="IsValidShortcut"/>).
+/// </summary>
 public readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, int Key)
 {
     public static HotkeyGesture Default { get; } = new(HotkeyModifiers.Alt, 0x20); // Alt+Space
@@ -19,7 +22,24 @@ public readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, int Key)
     /// <summary>A hotkey needs at least one modifier (a bare key would be stolen from every app).</summary>
     public bool IsValid => Modifiers != HotkeyModifiers.None && Key != 0 && !IsModifierKey(Key);
 
-    public static bool TryParse(string? text, out HotkeyGesture gesture)
+    /// <summary>
+    /// An in-app shortcut: function keys may stand alone (F5) or with Shift; anything else needs Ctrl, Alt or Win,
+    /// so typing in the address bar, the filter box or a rename never triggers a command.
+    /// </summary>
+    public bool IsValidShortcut =>
+        Key != 0 && !IsModifierKey(Key) &&
+        ((Modifiers & (HotkeyModifiers.Ctrl | HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0 || IsFunctionKey(Key));
+
+    public static bool IsFunctionKey(int key) => key is >= 0x70 and <= 0x87;
+
+    /// <summary>Parses an in-app shortcut ("F5", "Ctrl+Shift+N", "Alt+Left").</summary>
+    public static bool TryParseShortcut(string? text, out HotkeyGesture gesture) =>
+        TryParseAny(text, out gesture) && gesture.IsValidShortcut;
+
+    public static bool TryParse(string? text, out HotkeyGesture gesture) =>
+        TryParseAny(text, out gesture) && gesture.IsValid;
+
+    private static bool TryParseAny(string? text, out HotkeyGesture gesture)
     {
         gesture = default;
         if (string.IsNullOrWhiteSpace(text)) return false;
@@ -41,7 +61,7 @@ public readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, int Key)
         }
 
         gesture = new HotkeyGesture(modifiers, key);
-        return gesture.IsValid;
+        return key != 0;
     }
 
     public override string ToString()
@@ -60,6 +80,23 @@ public readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, int Key)
         0x20 => "Space",
         0x09 => "Tab",
         0x0D => "Enter",
+        0x08 => "Backspace",
+        0x1B => "Esc",
+        0x21 => "PageUp",
+        0x22 => "PageDown",
+        0x23 => "End",
+        0x24 => "Home",
+        0x25 => "Left",
+        0x26 => "Up",
+        0x27 => "Right",
+        0x28 => "Down",
+        0x2D => "Insert",
+        0x2E => "Del",
+        >= 0x60 and <= 0x69 => "Num" + (key - 0x60),
+        0x6A => "Num*",
+        0x6B => "NumPlus", // not "Num+": '+' separates the parts of a gesture
+        0x6D => "NumMinus",
+        0x6F => "Num/",
         0xC0 => "`",
         0xBA => ";",
         0xBB => "=",
@@ -79,6 +116,14 @@ public readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, int Key)
 
     private static int KeyFromName(string name)
     {
+        switch (name.ToLowerInvariant())
+        {
+            case "delete": return 0x2E;
+            case "escape": return 0x1B;
+            case "return": return 0x0D;
+            case "pgup": return 0x21;
+            case "pgdn": return 0x22;
+        }
         if (name.Length == 1)
         {
             char c = char.ToUpperInvariant(name[0]);

@@ -23,6 +23,25 @@ public sealed class QuickSearchHistoryTests
     }
 
     [Fact]
+    public void Forget_drops_the_history_entry_and_launch_count_only_for_that_path()
+    {
+        const string unikey = @"C:\Tools\UniKey\UniKeyNT.exe";
+        const string code = @"C:\VS Code\Code.exe";
+        var history = new List<QuickSearchHistoryEntry>();
+        QuickSearchHistory.Record(history, "unikey", unikey, "UniKeyNT.exe", QuickCandidateKind.File, Now);
+        QuickSearchHistory.Record(history, "code", code, "Visual Studio Code", QuickCandidateKind.App, Now);
+        var launches = new Dictionary<string, int> { [unikey.ToLowerInvariant()] = 4, [code.ToLowerInvariant()] = 2, [@"C:\Old\UNIKEYNT.EXE"] = 1 };
+
+        Assert.True(QuickSearchHistory.IsRemembered(history, launches, unikey.ToUpperInvariant()));
+        Assert.True(QuickSearchHistory.Forget(history, launches, unikey.ToUpperInvariant()));
+
+        Assert.False(QuickSearchHistory.IsRemembered(history, launches, unikey));
+        Assert.Equal(code, Assert.Single(history).Path);
+        Assert.Equal(2, launches.Count); // VS Code kept, and the unrelated C:\Old path too
+        Assert.False(QuickSearchHistory.Forget(history, launches, unikey)); // nothing left to forget
+    }
+
+    [Fact]
     public void Text_that_isnt_the_start_of_a_past_query_isnt_learned()
     {
         var history = new List<QuickSearchHistoryEntry>();

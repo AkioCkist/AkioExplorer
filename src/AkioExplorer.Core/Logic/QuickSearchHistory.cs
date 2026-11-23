@@ -60,6 +60,23 @@ public static class QuickSearchHistory
         }
     }
 
+    /// <summary>True when quick search ranks <paramref name="path"/> higher because it was opened from it before.</summary>
+    public static bool IsRemembered(List<QuickSearchHistoryEntry> history, Dictionary<string, int> launches, string path) =>
+        history.Any(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase)) || launches.ContainsKey(path.ToLowerInvariant());
+
+    /// <summary>
+    /// "Remove from suggestions": forgets that <paramref name="path"/> was opened, so it ranks like any other match
+    /// again (and no longer shows for a short prefix that only the history knew). Returns whether anything was forgotten.
+    /// </summary>
+    public static bool Forget(List<QuickSearchHistoryEntry> history, Dictionary<string, int> launches, string path)
+    {
+        int removed = history.RemoveAll(e => string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+        // Launch counts are keyed in lower case; older settings files may hold other casings.
+        foreach (var key in launches.Keys.Where(k => string.Equals(k, path, StringComparison.OrdinalIgnoreCase)).ToList())
+            removed += launches.Remove(key) ? 1 : 0;
+        return removed > 0;
+    }
+
     /// <summary>True when <paramref name="query"/> is the start of something typed before to open this entry.</summary>
     public static bool IsLearned(QuickSearchHistoryEntry entry, string query)
     {

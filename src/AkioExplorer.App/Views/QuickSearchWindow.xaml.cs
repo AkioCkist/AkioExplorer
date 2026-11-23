@@ -185,6 +185,10 @@ public sealed partial class QuickSearchWindow : Window
             case VirtualKey.C when ctrl && shift:
                 CopyText(ViewModel.Selected?.Path);
                 break;
+            // Like a browser's address bar: Shift+Del drops the selected suggestion (plain Del still edits the text).
+            case VirtualKey.Delete when shift && !ctrl && ViewModel.Selected is { } remembered && ViewModel.IsRemembered(remembered):
+                ViewModel.Forget(remembered);
+                break;
             default:
                 return;
         }
@@ -232,6 +236,12 @@ public sealed partial class QuickSearchWindow : Window
             menu.Items.Add(new MenuFlyoutSeparator());
             Add("Copy path", "", () => CopyText(result.Path), "Ctrl+Shift+C");
             Add("Copy name", "", () => CopyText(result.Title));
+            if (ViewModel.IsRemembered(result))
+            {
+                // Opened from here before, so it ranks first for what was typed back then: let the user undo that.
+                menu.Items.Add(new MenuFlyoutSeparator());
+                Add("Remove from suggestions", "", () => ViewModel.Forget(result), "Shift+Del");
+            }
         }
         menu.ShowAt(ResultsList, e.GetPosition(ResultsList));
         e.Handled = true;

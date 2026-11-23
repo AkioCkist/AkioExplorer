@@ -343,6 +343,90 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settings.Save();
     }
 
+    // ------------------------------------------------------------------ backup and reset
+
+    [ObservableProperty] private string _backupMessage = string.Empty;
+
+    public string SettingsFilePath => Path.Combine(AppPaths.DataFolder, "settings.json");
+
+    public async Task ExportSettingsAsync(string path)
+    {
+        try
+        {
+            await File.WriteAllTextAsync(path, SettingsBackup.Export(_settings.Current));
+            BackupMessage = $"Exported to {path}";
+        }
+        catch (Exception ex)
+        {
+            BackupMessage = "Couldn't export: " + ex.Message;
+        }
+    }
+
+    public async Task ImportSettingsAsync(string path)
+    {
+        try
+        {
+            var imported = SettingsBackup.Parse(await File.ReadAllTextAsync(path));
+            ApplyAll(target => SettingsBackup.Apply(imported, target));
+            BackupMessage = $"Imported from {Path.GetFileName(path)}. Dual pane and reopening folders apply the next time AkioExplorer starts.";
+        }
+        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
+        {
+            BackupMessage = "Couldn't import: " + ex.Message;
+        }
+    }
+
+    public void ResetSettings()
+    {
+        ApplyAll(SettingsBackup.ResetToDefaults);
+        BackupMessage = "Settings and keyboard shortcuts are back to their defaults.";
+    }
+
+    /// <summary>Replaces the preferences in place, then brings every switch here and the running app up to date.</summary>
+    private void ApplyAll(Action<AppSettings> change)
+    {
+        change(_settings.Current);
+        _favorites.Reload();
+        ReloadFromSettings();
+        _theme.Apply(_settings.Current.Theme);
+        _settings.NotifyChanged(); // panes, backdrop, hotkey, shortcuts and menus re-read settings; also saves
+    }
+
+    /// <summary>Shows the current settings in every control (their change handlers apply anything that differs).</summary>
+    private void ReloadFromSettings()
+    {
+        var s = _settings.Current;
+        ThemeIndex = (int)s.Theme;
+        DefaultViewIndex = (int)s.DefaultViewMode;
+        DualPaneOnStartup = s.DualPaneOnStartup;
+        ShowHiddenItems = s.ShowHiddenItems;
+        ShowFileExtensions = s.ShowFileExtensions;
+        AutoFolderSizes = s.AutoFolderSizes;
+        RestoreLastLocations = s.RestoreLastLocations;
+        ConflictBehaviorIndex = (int)s.ConflictBehavior;
+        MaxSimultaneousOperations = s.MaxSimultaneousOperations;
+        DownloadFolderText = string.IsNullOrWhiteSpace(s.DownloadFolder) ? "Windows Downloads folder" : s.DownloadFolder;
+        BackdropIndex = (int)s.Backdrop;
+        DateDisplayIndex = (int)s.DateDisplay;
+        DecimalSizeUnits = s.DecimalSizeUnits;
+        OnPropertyChanged(nameof(SizeUnitsIndex));
+        TreatDotFilesAsHidden = s.TreatDotFilesAsHidden;
+        HideJunkFiles = s.HideJunkFiles;
+        ConfirmRecycle = s.ConfirmRecycle;
+        TerminalIndex = (int)s.Terminal;
+        CopyPathFormatIndex = (int)s.CopyPathFormat;
+        ShowShellMenuItems = s.ShowShellMenuItems;
+        HiddenShellMenuItems = s.HiddenShellMenuItems;
+        ExternalOpenIndex = (int)s.ExternalOpenTarget;
+        // Quick search before "keep running": turning that off would otherwise switch quick search off too.
+        bool quickSearch = s.QuickSearchEnabled, keepRunning = s.KeepRunningInBackground;
+        QuickSearchHotkey = s.QuickSearchHotkey;
+        QuickSearchEnabled = quickSearch;
+        KeepRunningInBackground = keepRunning;
+        int editor = _editors.ToList().FindIndex(e => e.Id == s.PreferredEditor);
+        EditorIndex = editor < 0 ? 0 : editor + 1;
+    }
+
     [RelayCommand]
     private void RemoveFavorite(FavoriteEntry entry) => _favorites.Remove(entry);
 

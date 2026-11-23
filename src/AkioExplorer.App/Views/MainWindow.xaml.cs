@@ -115,6 +115,7 @@ public sealed partial class MainWindow : Window
         }
         if (_settings.Current.KeepRunningInBackground) EnsureTray();
         ApplyBackdrop();
+        InitShortcuts();
         InitQuickSearch();
         InitWinE();
     }
@@ -981,6 +982,24 @@ public sealed partial class MainWindow : Window
         return (await picker.PickSingleFolderAsync())?.Path;
     }
 
+    /// <summary>Save picker for Settings › Export. Returns the chosen path, or null when cancelled.</summary>
+    public async Task<string?> PickSaveFileAsync(string suggestedName, string typeName, string extension)
+    {
+        var picker = new FileSavePicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary, SuggestedFileName = suggestedName };
+        picker.FileTypeChoices.Add(typeName, [extension]);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        return (await picker.PickSaveFileAsync())?.Path;
+    }
+
+    /// <summary>Open picker for Settings › Import.</summary>
+    public async Task<string?> PickOpenFileAsync(string extension)
+    {
+        var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+        picker.FileTypeFilter.Add(extension);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        return (await picker.PickSingleFileAsync())?.Path;
+    }
+
     private void ShowSettings()
     {
         if (TransfersHost is not null) TransfersHost.Visibility = Visibility.Collapsed;
@@ -1132,7 +1151,7 @@ public sealed partial class MainWindow : Window
         var list = new List<PaletteCommand>();
 
         void Cmd(string title, string category, string? keys, string glyph, Func<bool> can, Action run, string keywords = "") =>
-            list.Add(new PaletteCommand(title, category, keys, glyph, can, run) { Keywords = keywords });
+            list.Add(new PaletteCommand(title, category, CurrentKeys(keys), glyph, can, run) { Keywords = keywords });
         void Rc(string title, string category, string? keys, string glyph, Func<FilePaneViewModel, System.Windows.Input.ICommand> command, string keywords = "") =>
             Cmd(title, category, keys, glyph, () => command(P()).CanExecute(null), () => command(P()).Execute(null), keywords);
         void Focus() => DispatcherQueue.TryEnqueue(() => ViewFor(P()).FocusList());

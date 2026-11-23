@@ -158,7 +158,7 @@ public static class AccountDialogs
         body.Children.Add(waiting);
         body.Children.Add(setup);
         body.Children.Add(form);
-        dialog.Content = body;
+        dialog.Content = Scrollable(body);
         dialog.CloseButtonClick += (_, _) => signIn?.Cancel();
 
         await dialogs.ShowAsync(dialog);
@@ -185,7 +185,7 @@ public static class AccountDialogs
         panel.Children.Add(progress);
         panel.Children.Add(form);
 
-        var dialog = new ContentDialog { Title = $"Reconnect \"{account.Name}\"", Content = panel, CloseButtonText = "Cancel" };
+        var dialog = new ContentDialog { Title = $"Reconnect \"{account.Name}\"", Content = Scrollable(panel), CloseButtonText = "Cancel" };
         dialog.CloseButtonClick += (_, _) => signIn.Cancel();
 
         async Task RunAsync(IReadOnlyDictionary<string, string> values)
@@ -634,6 +634,19 @@ public static class AccountDialogs
         show();
         id.Loaded += (_, _) => id.Focus(FocusState.Programmatic);
     }
+
+    /// <summary>
+    /// ContentDialog's own content area doesn't scroll, so a tall form (FTP, S3…) in a short window gets its last
+    /// fields and buttons cut off. The right padding keeps the scroll bar off the text boxes.
+    /// </summary>
+    private static ScrollViewer Scrollable(UIElement content) => new()
+    {
+        Content = content,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Padding = new Thickness(0, 0, 12, 0),
+        IsTabStop = false,
+    };
 
     private static void Show(InfoBar bar, string text, InfoBarSeverity severity)
     {

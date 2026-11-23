@@ -37,6 +37,8 @@
             </LinearGradientBrush>
             <!-- Starred on the cloud service. Amber, theme-aware: the light variant keeps 3:1 on white glass. -->
             <SolidColorBrush x:Key="StarredBrush" Color="#E5B209" />
+            <!-- Dialogs: frosted glass over the app instead of the stock solid #202020 sheet (DialogService). -->
+            <AcrylicBrush x:Key="GlassDialogBackgroundBrush" TintColor="#202020" TintOpacity="0.55" TintLuminosityOpacity="0.72" FallbackColor="#2B2B2B" />
             <!-- The panes draw their own glass, so NavigationView's flat content layer goes away. -->
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
@@ -63,6 +65,9 @@
                 <GradientStop Offset="1" Color="#CCFFFFFF" />
             </LinearGradientBrush>
             <SolidColorBrush x:Key="StarredBrush" Color="#A88608" />
+            <AcrylicBrush x:Key="GlassDialogBackgroundBrush" TintColor="#F3F3F3" TintOpacity="0.5" TintLuminosityOpacity="0.82" FallbackColor="#F9F9F9" />
+            <!-- Stock light overlay is opaque white and would hide the glass; half-white still lifts the body off the footer. -->
+            <SolidColorBrush x:Key="ContentDialogTopOverlay" Color="#80FFFFFF" />
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
         </ResourceDictionary>
@@ -74,6 +79,7 @@
             <SolidColorBrush x:Key="GlassInsetBackgroundPointerOverBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="GlassInsetBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="StarredBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="GlassDialogBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
         </ResourceDictionary>
@@ -88,6 +94,11 @@
 
     <!-- Sidebar rows: 32 + the template's 2 + 2 margin = 36 apart (default 40), closer to the file list's density. -->
     <x:Double x:Key="NavigationViewItemOnLeftMinHeight">32</x:Double>
+
+    <!-- Dialogs over a Mica/Acrylic window: glass sheet. DialogService keeps the stock solid style for Solid backdrop. -->
+    <Style x:Key="GlassContentDialogStyle" TargetType="ContentDialog" BasedOn="{StaticResource DefaultContentDialogStyle}">
+        <Setter Property="Background" Value="{ThemeResource GlassDialogBackgroundBrush}" />
+    </Style>
 
     <!-- Compact icon button for navigation bars: transparent at rest, native hover/pressed states. -->
     <Style x:Key="ToolIconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
