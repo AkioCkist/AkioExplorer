@@ -28,5 +28,9 @@ public static class XamlHelpers
     public static Microsoft.UI.Xaml.Controls.InfoBarSeverity Severity(bool isError) =>
         isError ? Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error : Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success;
 
+    /// <summary>A note that needs action reads as a warning; a state the user chose (paused) is plain information.</summary>
+    public static Microsoft.UI.Xaml.Controls.InfoBarSeverity NoteSeverity(bool needsAction) =>
+        needsAction ? Microsoft.UI.Xaml.Controls.InfoBarSeverity.Warning : Microsoft.UI.Xaml.Controls.InfoBarSeverity.Informational;
+
     public static double ActiveIndicatorOpacity(bool show, bool active) => show && active ? 1.0 : 0.0;
 }

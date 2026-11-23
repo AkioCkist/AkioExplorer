@@ -631,7 +631,7 @@ public sealed partial class FilePane : UserControl
         MenuMoveOther.Visibility = Show(dual);
         MenuSendToSeparator.Visibility = Visibility.Collapsed;
 
-        // More tools ▸
+        // Tools ▸
         MenuChecksum.Visibility = Show(ViewModel.ChecksumCommand.CanExecute(null));
         MenuFolderSize.Visibility = Show(local && selected.Any(s => s.IsContainer && !s.IsDrive));
         MenuAttrSeparator.Visibility = Show(local);
@@ -644,7 +644,8 @@ public sealed partial class FilePane : UserControl
         MenuCopyLink.Visibility = Show(ViewModel.CopyLinkCommand.CanExecute(null));
         MenuRemoveLink.Visibility = Show(ViewModel.RemoveLinkCommand.CanExecute(null));
         MenuStar.Visibility = Show(ViewModel.ToggleStarCommand.CanExecute(null));
-        MenuStar.Text = ViewModel.IsSelectionStarred ? "Remove from favourites" : "Add to favourites";
+        // "Star", not "favourites": local pins are Favorites, the cloud service's own mark is a star.
+        MenuStar.Text = ViewModel.IsSelectionStarred ? "Remove star" : "Star";
         MenuCloudHide.Visibility = Show(ViewModel.ToggleCloudHiddenCommand.CanExecute(null));
         MenuCloudHide.Text = ViewModel.IsSelectionHiddenOnService ? "Unhide" : "Hide";
         MenuVersions.Visibility = Show(ViewModel.ShowVersionsCommand.CanExecute(null));

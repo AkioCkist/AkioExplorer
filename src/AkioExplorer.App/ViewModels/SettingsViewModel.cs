@@ -58,8 +58,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     // Quick search
     [ObservableProperty] private bool _quickSearchEnabled;
     [ObservableProperty] private string _quickSearchHotkey = string.Empty;
-    [ObservableProperty] private string _quickSearchStatus = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QuickSearchStatusNeedsAction))]
+    private string _quickSearchStatus = string.Empty;
     private readonly GlobalHotkey _hotkey;
+
+    /// <summary>Key taken by another app (warning) rather than paused on purpose (information).</summary>
+    public bool QuickSearchStatusNeedsAction => _hotkey.StatusNeedsAction;
 
     private readonly IShellMenuService _shellMenus;
     private readonly ShellIntegration _integration = new();

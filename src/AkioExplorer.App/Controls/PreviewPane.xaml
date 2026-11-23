@@ -36,7 +36,7 @@
             <Image x:Name="ImageView" Stretch="Uniform" Visibility="Collapsed" Margin="4" />
 
             <ScrollViewer x:Name="TextScroller" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto"
-                          HorizontalScrollMode="Auto" Padding="10,8">
+                          HorizontalScrollMode="Auto" Padding="12,8">
                 <TextBlock x:Name="TextView" FontFamily="Cascadia Mono, Consolas" FontSize="12" IsTextSelectionEnabled="True" />
             </ScrollViewer>
 

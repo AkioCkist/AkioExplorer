@@ -63,6 +63,23 @@ public sealed class CloudAccount
     /// <summary>Non-secret connection settings entered in the add-account form (keys are <see cref="CloudField.Key"/>).</summary>
     public Dictionary<string, string> Settings { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Compact label for the sidebar and tabs, where the provider icon already says which service it is:
+    /// "Google Drive name@example.com" becomes "name". A name the user typed themself is kept as it is.
+    /// </summary>
+    [JsonIgnore]
+    public string ShortName
+    {
+        get
+        {
+            string? who = Email ?? UserName;
+            if (string.IsNullOrWhiteSpace(who) || !DisplayName.EndsWith(" " + who, StringComparison.OrdinalIgnoreCase))
+                return DisplayName;
+            int at = who.IndexOf('@');
+            return at > 0 ? who[..at] : who;
+        }
+    }
+
     [JsonIgnore]
     public string ProviderId => "cloud:" + Id.ToString("N");
 

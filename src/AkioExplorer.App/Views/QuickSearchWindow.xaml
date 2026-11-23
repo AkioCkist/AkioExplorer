@@ -14,7 +14,8 @@
         </Grid.RowDefinitions>
 
         <!-- Search box: the ghost text behind it shows the rest of the selected name (Tab accepts). -->
-        <Grid Padding="22,0,18,0" ColumnSpacing="12">
+        <!-- 20 in: the typed text starts where the result icons start (8 list padding + 12 item padding). -->
+        <Grid Padding="20,0,20,0" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -43,7 +44,7 @@
 
         <Rectangle x:Name="Divider" Grid.Row="1" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Visibility="Collapsed" />
 
-        <ListView x:Name="ResultsList" Grid.Row="2" Padding="6,6,6,6" SelectionMode="Single" IsItemClickEnabled="True" IsTabStop="False"
+        <ListView x:Name="ResultsList" Grid.Row="2" Padding="8" SelectionMode="Single" IsItemClickEnabled="True" IsTabStop="False"
                   ItemsSource="{x:Bind ViewModel.Results}" SelectedIndex="{x:Bind ViewModel.SelectedIndex, Mode=TwoWay}"
                   ItemClick="OnResultClick" RightTapped="OnResultsRightTapped" ContainerContentChanging="OnContainerContentChanging"
                   AutomationProperties.Name="Results">
@@ -51,14 +52,14 @@
                 <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                     <Setter Property="MinHeight" Value="56" />
                     <Setter Property="Height" Value="56" />
-                    <Setter Property="Margin" Value="0,1,0,1" />
+                    <Setter Property="Margin" Value="0,2,0,2" />
                     <Setter Property="Padding" Value="12,0,12,0" />
                     <Setter Property="IsTabStop" Value="False" />
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:QuickSearchResult">
-                    <Grid ColumnSpacing="14" Background="Transparent">
+                    <Grid ColumnSpacing="12" Background="Transparent">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32" />
                             <ColumnDefinition Width="*" />

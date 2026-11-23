@@ -87,7 +87,9 @@
 
                     <!-- Toolbar: commands act on the active pane. Only working commands are shown. -->
                     <!-- Floating glass bar: one step above the pane sheets. -->
-                    <Border x:Name="ToolbarGlass" HorizontalAlignment="Left" Margin="4,4,8,0" Padding="2,0"
+                    <!-- Stretches to exactly the panes' width (same 4 / 8 side margins as PanesGrid), so both edges line up;
+                         the commands stay left and the overflow button follows them. -->
+                    <Border x:Name="ToolbarGlass" HorizontalAlignment="Stretch" Margin="4,4,8,0" Padding="2,0"
                             CornerRadius="{StaticResource GlassCardCornerRadius}" BorderThickness="1"
                             Background="{ThemeResource GlassFloatBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}">
                     <CommandBar x:Name="Toolbar" DefaultLabelPosition="Right" HorizontalAlignment="Left" Background="Transparent"
@@ -150,8 +152,10 @@
                                 </MenuFlyout>
                             </AppBarButton.Flyout>
                         </AppBarButton>
-                        <AppBarSeparator />
+                        <!-- Cloud-only commands: hidden on this PC instead of greyed out, so they don't push Preview into the overflow. -->
+                        <AppBarSeparator Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.ActivePane.IsRemote), Mode=OneWay}" />
                         <AppBarButton Label="Upload" IsEnabled="{x:Bind ViewModel.ActivePane.CanUpload, Mode=OneWay}"
+                                      Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.ActivePane.IsRemote), Mode=OneWay}"
                                       ToolTipService.ToolTip="Upload files or a folder from this PC into this cloud folder">
                             <AppBarButton.Icon><FontIcon Glyph="&#xE898;" /></AppBarButton.Icon>
                             <AppBarButton.Flyout>
@@ -166,6 +170,7 @@
                             </AppBarButton.Flyout>
                         </AppBarButton>
                         <AppBarButton Label="Download" IsEnabled="{x:Bind ViewModel.ActivePane.CanDownload, Mode=OneWay}"
+                                      Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.ActivePane.IsRemote), Mode=OneWay}"
                                       ToolTipService.ToolTip="Download the selection to this PC">
                             <AppBarButton.Icon><FontIcon Glyph="&#xE896;" /></AppBarButton.Icon>
                             <AppBarButton.Flyout>
@@ -299,7 +304,7 @@
                     </Grid>
 
                     <!-- Running copy / move operations (only operations longer than ~0.6 s appear) -->
-                    <Border Grid.Row="2" Margin="4,0,8,8" Padding="16,6,8,6" BorderThickness="1"
+                    <Border Grid.Row="2" Margin="4,0,8,8" Padding="16,8,8,8" BorderThickness="1"
                             CornerRadius="{StaticResource GlassCardCornerRadius}"
                             Background="{ThemeResource GlassCardBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}"
                             Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.Operations.HasItems), Mode=OneWay}">
@@ -360,16 +365,16 @@
                                                 <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind PauseOrResumeCommand}"
                                                         Visibility="{x:Bind conv:XamlHelpers.Visible(IsRunning), Mode=OneWay}"
                                                         ToolTipService.ToolTip="{x:Bind PauseLabel, Mode=OneWay}" AutomationProperties.Name="{x:Bind PauseLabel, Mode=OneWay}">
-                                                    <FontIcon Glyph="{x:Bind PauseGlyph, Mode=OneWay}" FontSize="13" />
+                                                    <FontIcon Glyph="{x:Bind PauseGlyph, Mode=OneWay}" FontSize="14" />
                                                 </Button>
                                                 <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind RetryCommand}"
                                                         Visibility="{x:Bind conv:XamlHelpers.Visible(CanRetry), Mode=OneWay}"
                                                         ToolTipService.ToolTip="Retry (files that already arrived are skipped)" AutomationProperties.Name="Retry">
-                                                    <FontIcon Glyph="&#xE72C;" FontSize="13" />
+                                                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
                                                 </Button>
                                                 <Button Style="{StaticResource ToolIconButtonStyle}" Command="{x:Bind CancelOrDismissCommand}"
                                                         ToolTipService.ToolTip="Cancel or dismiss" AutomationProperties.Name="Cancel or dismiss">
-                                                    <FontIcon Glyph="&#xE711;" FontSize="12" />
+                                                    <FontIcon Glyph="&#xE711;" FontSize="14" />
                                                 </Button>
                                             </StackPanel>
                                         </Grid>

@@ -30,6 +30,31 @@ public sealed class DetailFormattingTests
     }
 
     [Fact]
+    public void Size_summary_is_one_line()
+    {
+        Assert.Equal("512 bytes", DetailFormatting.SizeSummary(512, En));
+        Assert.Equal($"{Formatting.FormatSize(34_112_334, En)} (34,112,334 bytes)", DetailFormatting.SizeSummary(34_112_334, En));
+    }
+
+    [Fact]
+    public void Date_with_age()
+    {
+        var now = new DateTimeOffset(2026, 11, 22, 12, 0, 0, TimeSpan.Zero);
+        var when = now.AddDays(-27);
+        string date = when.LocalDateTime.ToString("g", En);
+        Assert.Equal($"{date} · 27 days ago", DetailFormatting.DateWithAge(when, now, En));
+        Assert.EndsWith(" · just now", DetailFormatting.DateWithAge(now.AddSeconds(-5), now, En));
+    }
+
+    [Fact]
+    public void Attribute_names_skip_the_noise()
+    {
+        Assert.Null(DetailFormatting.AttributeNames(FileAttributes.Archive));
+        Assert.Null(DetailFormatting.AttributeNames(FileAttributes.Normal));
+        Assert.Equal("Read-only, Hidden", DetailFormatting.AttributeNames(FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.Archive));
+    }
+
+    [Fact]
     public void Duration_attributes_bitrate()
     {
         Assert.Equal("2:57", DetailFormatting.Duration(TimeSpan.FromSeconds(177)));

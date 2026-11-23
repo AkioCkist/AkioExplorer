@@ -218,7 +218,12 @@ public sealed partial class QuickSearchWindow : Window
             menu.Items.Add(item);
         }
 
-        Add(result.Kind == QuickResultKind.Web ? "Search" : "Open", "", () => ViewModel.Open(result), "Enter");
+        Add(result.Kind switch
+        {
+            QuickResultKind.Web => "Search",
+            QuickResultKind.Calculator => "Copy result",
+            _ => "Open",
+        },"", () => ViewModel.Open(result), "Enter");
         if (result.IsOnDisk)
         {
             Add("Show in AkioExplorer", "", () => ViewModel.Open(result, inFolder: true), "Ctrl+Enter");

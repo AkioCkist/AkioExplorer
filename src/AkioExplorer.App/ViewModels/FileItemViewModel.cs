@@ -193,20 +193,23 @@ public sealed partial class FileItemViewModel : ObservableObject
     }
 }
 
-/// <summary>Colours of <see cref="ItemLabel"/> (MEGA's palette), shared by the list and the menus.</summary>
+/// <summary>
+/// Colours of <see cref="ItemLabel"/> (MEGA's hues), shared by the list and the menus. Mid tones, toned down from MEGA's
+/// neon: each one keeps at least 3:1 against both the light and the dark glass, so a 9 px dot stays visible in either theme.
+/// </summary>
 public static class LabelColors
 {
     private static readonly Dictionary<ItemLabel, SolidColorBrush> Brushes = new();
 
     public static Windows.UI.Color Color(ItemLabel label) => label switch
     {
-        ItemLabel.Red => Windows.UI.Color.FromArgb(255, 0xF0, 0x37, 0x3A),
-        ItemLabel.Orange => Windows.UI.Color.FromArgb(255, 0xF9, 0x89, 0x1F),
-        ItemLabel.Yellow => Windows.UI.Color.FromArgb(255, 0xF5, 0xC3, 0x0F),
-        ItemLabel.Green => Windows.UI.Color.FromArgb(255, 0x4C, 0xC8, 0x4A),
-        ItemLabel.Blue => Windows.UI.Color.FromArgb(255, 0x3E, 0x8B, 0xF6),
-        ItemLabel.Purple => Windows.UI.Color.FromArgb(255, 0xA3, 0x5E, 0xD8),
-        ItemLabel.Grey => Windows.UI.Color.FromArgb(255, 0x9A, 0x9A, 0x9A),
+        ItemLabel.Red => Windows.UI.Color.FromArgb(255, 0xD1, 0x34, 0x38),
+        ItemLabel.Orange => Windows.UI.Color.FromArgb(255, 0xDA, 0x6B, 0x1C),
+        ItemLabel.Yellow => Windows.UI.Color.FromArgb(255, 0xA8, 0x86, 0x08),
+        ItemLabel.Green => Windows.UI.Color.FromArgb(255, 0x3A, 0x9A, 0x3E),
+        ItemLabel.Blue => Windows.UI.Color.FromArgb(255, 0x3B, 0x7D, 0xD8),
+        ItemLabel.Purple => Windows.UI.Color.FromArgb(255, 0x8E, 0x5C, 0xC9),
+        ItemLabel.Grey => Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A),
         _ => Windows.UI.Color.FromArgb(0, 0, 0, 0),
     };
 

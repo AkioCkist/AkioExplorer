@@ -28,7 +28,6 @@ public sealed partial class MainWindow : Window
     private readonly CloudAccountsViewModel _cloud;
     private const string AddAccountTag = "add-cloud-account";
     private const string TransfersTag = "transfers";
-    private const string HistoryTag = "transfer-history";
     private NavigationViewItem? _transfersItem;
     private bool _initialized;
     private bool _ready;
@@ -38,6 +37,7 @@ public sealed partial class MainWindow : Window
     private QuickSearchWindow? _quickSearch;
     private string? _appliedHotkey;
     private bool _exitRequested;
+    private bool _shutDown;
     private LaunchRequest? _pendingLaunch;
 
     public MainWindow(MainViewModel viewModel, ISettingsService settings, ThemeService theme, DialogService dialogs, FavoritesService favorites, ILogger<MainWindow> logger, CloudAccountsViewModel cloud)
@@ -74,6 +74,9 @@ public sealed partial class MainWindow : Window
         // toolbar and re-flowed its "More" overflow at the end – the visible jerk.
         Nav.PaneOpening += (_, _) => UpdateContentWidth();
         Nav.PaneClosing += (_, _) => UpdateContentWidth();
+        // Upload / Download show only on cloud folders: the toolbar's spacing is worked out again when they come or go.
+        foreach (var command in Toolbar.PrimaryCommands.OfType<UIElement>())
+            command.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => QueueToolbarJustify());
         Activated += OnActivated;
         AppWindow.Closing += OnClosing;
 
@@ -257,11 +260,16 @@ public sealed partial class MainWindow : Window
         await ViewModel.NavigateActiveAsync(location);
     }
 
-    /// <summary>Tray › Exit: really quit, even with "keep running in the background" on.</summary>
+    /// <summary>
+    /// Tray › Exit: really quit, even with "keep running in the background" on. Window.Close() from code does not
+    /// raise AppWindow.Closing (only the system close button does), so the shutdown work runs here and the app is
+    /// ended explicitly; otherwise the hidden quick-search and tray-menu windows keep the process alive.
+    /// </summary>
     private void ExitApp()
     {
         _exitRequested = true;
-        Close();
+        Shutdown();
+        Application.Current.Exit();
     }
 
     private void OnIntegrationSettingsChanged()
@@ -364,17 +372,31 @@ public sealed partial class MainWindow : Window
 
     private void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        SavePlacement();
-        ViewModel.SaveState();
-        _settings.Flush();
         if (!_exitRequested && _settings.Current.KeepRunningInBackground)
         {
+            SaveSession();
             // Stay alive in the notification area so the next Win+E / folder opens instantly.
             args.Cancel = true;
             EnsureTray();
             AppWindow.Hide();
             return;
         }
+        Shutdown();
+    }
+
+    private void SaveSession()
+    {
+        SavePlacement();
+        ViewModel.SaveState();
+        _settings.Flush();
+    }
+
+    /// <summary>Everything that must happen before the process ends. Runs once, from the close button or Tray › Exit.</summary>
+    private void Shutdown()
+    {
+        if (_shutDown) return;
+        _shutDown = true;
+        SaveSession();
         _tray?.Dispose();
         _tray = null;
         _quickSearch?.CloseForExit(); // a hidden popup would otherwise keep the process alive
@@ -557,25 +579,14 @@ public sealed partial class MainWindow : Window
         Nav.MenuItems.Clear();
 
         Nav.MenuItems.Add(CreateNavItem("Home", "", MainViewModel.Home, "This PC: your folders and drives"));
-        _transfersItem = new NavigationViewItem { Content = "Transfer queue", Icon = new FontIcon { Glyph = "\uE8AB" }, Tag = TransfersTag };
-        ToolTipService.SetToolTip(_transfersItem, "Running and waiting copies, uploads and downloads");
+        // One entry: the page itself has Queue and Recent tabs.
+        _transfersItem = new NavigationViewItem { Content = "Transfers", Icon = new FontIcon { Glyph = "" }, Tag = TransfersTag };
+        ToolTipService.SetToolTip(_transfersItem, "Running, waiting and recent copies, uploads and downloads");
         Nav.MenuItems.Add(_transfersItem);
-        var recent = new NavigationViewItem { Content = "Recent transfers", Icon = new FontIcon { Glyph = "\uE81C" }, Tag = HistoryTag };
-        ToolTipService.SetToolTip(recent, "Finished, failed and interrupted transfers – retry from here");
-        Nav.MenuItems.Add(recent);
         UpdateTransfersBadge();
 
-        Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Favorites" });
-        if (ViewModel.Favorites.Count == 0)
-        {
-            Nav.MenuItems.Add(new NavigationViewItem
-            {
-                Content = "Right-click a folder › Pin",
-                IsEnabled = false,
-                SelectsOnInvoked = false,
-                Icon = new FontIcon { Glyph = "" },
-            });
-        }
+        // No header until something is pinned (Pin to Favorites in the right-click menu); an empty section reads as a locked feature.
+        if (ViewModel.Favorites.Count > 0) Nav.MenuItems.Add(SectionHeader("Favorites"));
         foreach (var favorite in ViewModel.Favorites)
         {
             var item = CreateNavItem(favorite.Name, "", new StorageLocation(favorite.ProviderId, favorite.Path), favorite.Path);
@@ -586,18 +597,19 @@ public sealed partial class MainWindow : Window
             Nav.MenuItems.Add(item);
         }
 
-        Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Cloud accounts" });
+        Nav.MenuItems.Add(SectionHeader("Cloud accounts"));
         foreach (var account in _cloud.Accounts)
         {
             var item = new NavigationViewItem
             {
-                Content = account.Name,
+                Content = SidebarName(account),
                 Icon = AccountDialogs.ProviderIcon(account.IconUri),
                 Tag = _cloud.RootOf(account.Account),
             };
             if (account.NeedsReconnect)
                 item.InfoBadge = new InfoBadge { Style = (Style)Application.Current.Resources["AttentionIconInfoBadgeStyle"] };
-            ToolTipService.SetToolTip(item, account.NeedsReconnect ? $"{account.Subtitle} · sign-in expired" : account.Subtitle);
+            string tip = account.Name == account.ServiceName ? account.Name : $"{account.ServiceName} · {account.Subtitle}";
+            ToolTipService.SetToolTip(item, account.NeedsReconnect ? $"{tip} · sign-in expired" : tip);
             item.ContextFlyout = AccountMenu(account);
             Nav.MenuItems.Add(item);
         }
@@ -608,10 +620,10 @@ public sealed partial class MainWindow : Window
             Tag = AddAccountTag,
             SelectsOnInvoked = false,
         };
-        ToolTipService.SetToolTip(add, "Connect Google Drive, Dropbox or OneDrive");
+        ToolTipService.SetToolTip(add, "Connect a cloud drive, a server (FTP, SFTP, WebDAV) or object storage (S3, Azure)");
         Nav.MenuItems.Add(add);
 
-        Nav.MenuItems.Add(new NavigationViewItemHeader { Content = "Local Computer" });
+        Nav.MenuItems.Add(SectionHeader("This PC"));
         foreach (var folder in ViewModel.KnownFolders)
             Nav.MenuItems.Add(CreateNavItem(folder.Name, folder.Glyph, new StorageLocation("local", folder.Path), folder.Path));
         foreach (var drive in ViewModel.Drives)
@@ -630,6 +642,26 @@ public sealed partial class MainWindow : Window
         }
 
         SyncSidebarSelection();
+    }
+
+    /// <summary>
+    /// Section label that sits close to its own items: 24 above, 8 below. The template's header row is a fixed 40,
+    /// so the shift comes from the margin; it never takes clicks, so the overlap with the first row is harmless.
+    /// </summary>
+    private static NavigationViewItemHeader SectionHeader(string text) => new()
+    {
+        Content = text,
+        Margin = new Thickness(0, 8, 0, -8),
+        IsHitTestVisible = false,
+    };
+
+    /// <summary>Short account label; falls back to the full address when two accounts of one service share it.</summary>
+    private string SidebarName(CloudAccountItem account)
+    {
+        string name = account.Account.ShortName;
+        bool clash = _cloud.Accounts.Any(other => other != account && other.Account.Type == account.Account.Type
+                                                  && string.Equals(other.Account.ShortName, name, StringComparison.OrdinalIgnoreCase));
+        return clash ? account.Account.Email ?? account.Account.UserName ?? account.Name : name;
     }
 
     private static NavigationViewItem CreateNavItem(string text, string glyph, StorageLocation location, string tooltip)
@@ -665,9 +697,9 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (args.InvokedItemContainer?.Tag is TransfersTag or HistoryTag)
+        if (args.InvokedItemContainer?.Tag is TransfersTag)
         {
-            ShowTransfers(history: args.InvokedItemContainer.Tag is HistoryTag);
+            ShowTransfers(history: false);
             return;
         }
 
@@ -813,7 +845,7 @@ public sealed partial class MainWindow : Window
         ExplorerHost.Visibility = Visibility.Collapsed;
         if (SettingsHost is not null) SettingsHost.Visibility = Visibility.Collapsed;
         if (history) TransfersHost.ShowHistory(); else TransfersHost.ShowQueue();
-        Nav.SelectedItem = Nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Tag as string == (history ? HistoryTag : TransfersTag));
+        Nav.SelectedItem = Nav.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(i => i.Tag as string == TransfersTag);
     }
 
     // ------------------------------------------------------------------ upload / download
@@ -891,13 +923,58 @@ public sealed partial class MainWindow : Window
         double width = Math.Floor(RootGrid.ActualWidth - pane - 1);
         if (width <= 0) return;
         if (width != ContentRoot.Width) ContentRoot.Width = width; // unchanged: skip re-laying out toolbar and lists
+        // The CommandBar sizes itself to its commands and only overflows when told the room is short: cap it at the
+        // glass bar's inner width (minus the 4 + 8 side margins and 2 + 2 padding) so it never runs past the panes' edge.
+        Toolbar.MaxWidth = Math.Max(0, width - ToolbarGlass.Margin.Left - ToolbarGlass.Margin.Right
+                                       - ToolbarGlass.Padding.Left - ToolbarGlass.Padding.Right - ToolbarGlass.BorderThickness.Left - ToolbarGlass.BorderThickness.Right);
+        QueueToolbarJustify();
         SettingsHost?.SetAvailableWidth(width);
+    }
+
+    private bool _justifyQueued;
+
+    /// <summary>Re-spreads the toolbar once layout has settled (coalesces a burst of resize / visibility changes).</summary>
+    private void QueueToolbarJustify()
+    {
+        if (_justifyQueued) return;
+        _justifyQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, JustifyToolbar);
+    }
+
+    /// <summary>
+    /// Justifies the toolbar across the glass bar: the spare width is shared out over the group separators, so the
+    /// first command sits at the left edge and the "More" button at the right edge, with the same inset on both sides.
+    /// Runs again whenever the width changes (window, sidebar) or a command shows or hides (Upload / Download on a
+    /// cloud folder), and after the CommandBar has moved commands into "More" on a narrow window.
+    /// </summary>
+    private void JustifyToolbar()
+    {
+        _justifyQueued = false;
+        // Hidden behind Settings / Transfers: nothing to measure; ShowExplorer queues it again.
+        if (ExplorerHost.Visibility != Visibility.Visible || double.IsInfinity(Toolbar.MaxWidth) || Toolbar.MaxWidth <= 0) return;
+
+        var separators = Toolbar.PrimaryCommands.OfType<AppBarSeparator>().ToList();
+        foreach (var separator in separators) separator.Margin = default;
+        Toolbar.UpdateLayout(); // natural width, and the CommandBar's own overflow decision at that width
+
+        var shown = separators.Where(s => s.Visibility == Visibility.Visible && !s.IsInOverflow).ToList();
+        // Whole pixels only, minus one for rounding, so the bar never grows past the cap and pushes a command into "More".
+        int spare = (int)Math.Floor(Toolbar.MaxWidth - Toolbar.ActualWidth) - 1;
+        if (shown.Count == 0 || spare <= 0) return;
+
+        for (int i = 0; i < shown.Count; i++)
+        {
+            int gap = spare / shown.Count + (i < spare % shown.Count ? 1 : 0); // remainder pixels go to the first gaps
+            int left = gap / 2;
+            shown[i].Margin = new Thickness(left, 0, gap - left, 0);
+        }
     }
 
     private void ShowExplorer()
     {
         if (ExplorerHost.Visibility == Visibility.Visible) return;
         ExplorerHost.Visibility = Visibility.Visible;
+        QueueToolbarJustify(); // the width may have changed while another page was showing
         if (SettingsHost is not null) SettingsHost.Visibility = Visibility.Collapsed;
         if (TransfersHost is not null) TransfersHost.Visibility = Visibility.Collapsed;
         SyncSidebarSelection();
@@ -985,7 +1062,7 @@ public sealed partial class MainWindow : Window
         // Cloud
         Rc("Copy link (share)", "Cloud", null, "", p => p.CopyLinkCommand, "share public link url mega drive");
         Rc("Turn off link…", "Cloud", null, "", p => p.RemoveLinkCommand, "unshare stop sharing link");
-        Rc("Add to / remove from favourites", "Cloud", null, "", p => p.ToggleStarCommand, "star starred favourite favorite");
+        Rc("Star / remove star", "Cloud", null, "", p => p.ToggleStarCommand, "star starred favourite favorite");
         Rc("Hide / unhide (cloud)", "Cloud", null, "", p => p.ToggleCloudHiddenCommand, "sensitive hide mega");
         Rc("Versions…", "Cloud", null, "", p => p.ShowVersionsCommand, "history previous version restore revisions");
         Rc("Open a link someone shared…", "Cloud", null, "", p => p.OpenPublicLinkCommand, "import mega link save to my drive");
@@ -997,7 +1074,7 @@ public sealed partial class MainWindow : Window
         Rc("Add shortcut to My Drive", "Cloud", null, "\uE71B", p => p.AddShortcutCommand, "shortcut link alias");
         Rc("Make a Google copy (convert)", "Cloud", null, "\uE8AB", p => p.ConvertToOnlineCommand, "convert docx xlsx pptx google docs sheets slides");
         Rc("Lock / unlock editing", "Cloud", null, "\uE72E", p => p.ToggleLockCommand, "read-only restrict content");
-        Cmd("Starred / favourites", "Cloud", null, "\uE734", () => P().Provider is not null, () => _ = P().ShowStarredAsync(), "star starred favourites");
+        Cmd("Starred", "Cloud", null, "\uE734", () => P().Provider is not null, () => _ = P().ShowStarredAsync(), "star starred favourites");
         Cmd("Largest files (storage)", "Cloud", null, "\uEDA2", () => P().Provider is not null, () => _ = P().ShowLargestFilesAsync(), "storage space size big quota clean up");
         Cmd("Recent files (last 30 days)", "Cloud", null, "", () => P().Provider is not null, () => _ = P().ShowRecentFilesAsync(), "recents recently changed added");
         Cmd("Photos & videos", "Cloud", null, "", () => P().Provider is not null, () => _ = P().ShowMediaAsync(), "media timeline pictures gallery");

@@ -51,6 +51,37 @@ public static class DetailFormatting
         return new string(chars);
     }
 
+    /// <summary>
+    /// One size line: the rounded size in the units the user picked, then the exact count, e.g. "32.5 MB (34,112,334 bytes)".
+    /// Small sizes are exact already, so they stay a single number.
+    /// </summary>
+    public static string SizeSummary(long bytes, CultureInfo? culture = null) =>
+        bytes < 1000 ? Bytes(bytes, culture) : $"{Formatting.FormatSize(bytes, culture)} ({Bytes(bytes, culture)})";
+
+    /// <summary>A date with its age, e.g. "10/27/2026 2:25 AM · 27 days ago".</summary>
+    public static string DateWithAge(DateTimeOffset when, DateTimeOffset now, CultureInfo? culture = null)
+    {
+        string date = when.LocalDateTime.ToString("g", culture ?? CultureInfo.CurrentCulture);
+        string age = Age(when, now);
+        return age is "just now" or "in the future" ? $"{date} · {age}" : $"{date} · {age} ago";
+    }
+
+    /// <summary>
+    /// The attributes worth telling someone, in words ("Read-only, Hidden"); null when there are none.
+    /// Archive and the like are left out: they are set on almost every file and say nothing.
+    /// </summary>
+    public static string? AttributeNames(FileAttributes attributes)
+    {
+        var names = new List<string>(5);
+        if (attributes.HasFlag(FileAttributes.ReadOnly)) names.Add("Read-only");
+        if (attributes.HasFlag(FileAttributes.Hidden)) names.Add("Hidden");
+        if (attributes.HasFlag(FileAttributes.System)) names.Add("System");
+        if (attributes.HasFlag(FileAttributes.Compressed)) names.Add("Compressed");
+        if (attributes.HasFlag(FileAttributes.Encrypted)) names.Add("Encrypted");
+        if (attributes.HasFlag(FileAttributes.ReparsePoint)) names.Add("Link");
+        return names.Count == 0 ? null : string.Join(", ", names);
+    }
+
     public static string BitRate(uint bitsPerSecond) =>
         bitsPerSecond >= 1_000_000 ? $"{bitsPerSecond / 1_000_000.0:0.#} Mbps" : $"{Math.Round(bitsPerSecond / 1000.0)} kbps";
 

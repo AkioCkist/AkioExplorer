@@ -19,6 +19,8 @@ public enum QuickResultKind
     Web,
     Location,
     Hint,
+    /// <summary>The typed text is arithmetic; <see cref="QuickSearchResult.Path"/> holds the answer to copy.</summary>
+    Calculator,
 }
 
 /// <summary>One row of the quick-search popup.</summary>
@@ -253,6 +255,20 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         };
         ranked.Insert(Math.Min(1, ranked.Count), web);
         ranked.AddRange(results.Where(r => r.Kind == QuickResultKind.Hint));
+
+        // Arithmetic ("2+2*0.231314/2"): the answer goes on top, Enter copies it.
+        if (Calculator.TryEvaluate(query, out double value))
+        {
+            string answer = Calculator.Format(value);
+            ranked.Insert(0, new QuickSearchResult
+            {
+                Kind = QuickResultKind.Calculator,
+                Title = "= " + answer,
+                Subtitle = query.TrimStart('=').Trim() + "  ·  Enter to copy, Tab to keep calculating",
+                Path = answer,
+                Glyph = "",
+            });
+        }
         return ranked;
     }
 
@@ -311,7 +327,7 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     private void UpdateCompletion()
     {
         string typed = Query;
-        Completion = Selected is { Kind: not QuickResultKind.Web and not QuickResultKind.Hint } s &&
+        Completion = Selected is { Kind: not QuickResultKind.Web and not QuickResultKind.Hint and not QuickResultKind.Calculator } s &&
                      typed.Length > 0 && s.Title.Length > typed.Length && s.Title.StartsWith(typed, StringComparison.OrdinalIgnoreCase)
             ? s.Title[typed.Length..]
             : string.Empty;
@@ -329,8 +345,9 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     public bool AcceptCompletion()
     {
         if (Selected is not { } s || s.Kind is QuickResultKind.Web or QuickResultKind.Hint) return false;
-        if (string.Equals(Query, s.Title, StringComparison.Ordinal)) return false;
-        Query = s.Title;
+        string text = s.Kind == QuickResultKind.Calculator ? s.Path : s.Title; // the answer, to keep calculating
+        if (string.Equals(Query, text, StringComparison.Ordinal)) return false;
+        Query = text;
         return true;
     }
 
@@ -344,7 +361,14 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         if (result is null || !result.IsOpenable) return;
         try
         {
-            if (result.Kind == QuickResultKind.Web)
+            if (result.Kind == QuickResultKind.Calculator)
+            {
+                var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                package.SetText(result.Path);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+                Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+            }
+            else if (result.Kind == QuickResultKind.Web)
             {
                 _shell.Open(result.Path);
             }

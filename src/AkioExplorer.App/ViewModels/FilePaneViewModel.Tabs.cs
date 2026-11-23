@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Cloud;
 using AkioExplorer.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -12,7 +13,29 @@ public sealed partial class PaneTab : ObservableObject
 {
     [ObservableProperty] private string _title = string.Empty;
 
+    /// <summary>Tab icon: cloud for a cloud account, home for This PC, folder otherwise.</summary>
+    [ObservableProperty] private string _glyph = FolderGlyph;
+
+    private const string FolderGlyph = "";
+    private const string CloudGlyph = "";
+    private const string HomeGlyph = "";
+
     public StorageLocation? Location { get; set; }
+
+    /// <summary>
+    /// Points the tab at <paramref name="location"/> and names it. A cloud account's root uses the short account name
+    /// ("name" rather than "Google Drive name@example.com"), since the tab is narrow.
+    /// </summary>
+    internal void Describe(IStorageProvider? provider, StorageLocation location, string? fallback = null)
+    {
+        Location = location;
+        string name = provider?.GetDisplayName(location.Path) ?? fallback ?? location.Path;
+        if (provider is ICloudStorageProvider cloud && name == cloud.Account.DisplayName) name = cloud.Account.ShortName;
+        Title = name;
+        Glyph = provider is ICloudStorageProvider ? CloudGlyph
+              : location.ProviderId == LocalStorageProvider.ProviderId && location.Path.Length == 0 ? HomeGlyph
+              : FolderGlyph;
+    }
 
     internal Stack<StorageLocation> Back { get; } = new();
 
@@ -60,8 +83,7 @@ public sealed partial class FilePaneViewModel
 
     private void UpdateActiveTab(IStorageProvider provider, StorageLocation target)
     {
-        ActiveTab.Location = target;
-        ActiveTab.Title = provider.GetDisplayName(target.Path);
+        ActiveTab.Describe(provider, target);
     }
 
     /// <summary>Ctrl+T: a new tab at the current folder (like duplicating a browser tab, but with fresh history).</summary>
@@ -75,11 +97,8 @@ public sealed partial class FilePaneViewModel
     /// <summary>Opens <paramref name="location"/> in a new tab right after the current one.</summary>
     public void OpenInNewTab(StorageLocation location, bool activate)
     {
-        var tab = new PaneTab
-        {
-            Location = location,
-            Title = _registry.Find(location.ProviderId)?.GetDisplayName(location.Path) ?? location.Path,
-        };
+        var tab = new PaneTab();
+        tab.Describe(_registry.Find(location.ProviderId), location);
         Tabs.Insert(ActiveTabIndex + 1, tab);
         if (activate) _ = SwitchToTabAsync(tab);
     }
@@ -120,12 +139,8 @@ public sealed partial class FilePaneViewModel
             return;
         }
 
-        var tab = new PaneTab
-        {
-            Location = location,
-            Title = _registry.Find(location.ProviderId)?.GetDisplayName(location.Path) ?? location.Path,
-            FocusPath = focus,
-        };
+        var tab = new PaneTab { FocusPath = focus };
+        tab.Describe(_registry.Find(location.ProviderId), location);
         Tabs.Insert(ActiveTabIndex + 1, tab);
         await SwitchToTabAsync(tab);
     }
@@ -234,11 +249,10 @@ public sealed partial class FilePaneViewModel
         foreach (var saved in state.Tabs)
         {
             var location = new StorageLocation(saved.ProviderId, saved.Path);
-            Tabs.Add(new PaneTab
-            {
-                Location = location,
-                Title = _registry.Find(saved.ProviderId)?.GetDisplayName(saved.Path) ?? (saved.Path.Length == 0 ? "This PC" : Path.GetFileName(saved.Path.TrimEnd('\\'))),
-            });
+            var tab = new PaneTab();
+            tab.Describe(_registry.Find(saved.ProviderId), location,
+                         saved.Path.Length == 0 ? "This PC" : Path.GetFileName(saved.Path.TrimEnd('\\')));
+            Tabs.Add(tab);
         }
         ActiveTab = Tabs[Math.Clamp(state.ActiveTab, 0, Tabs.Count - 1)];
     }

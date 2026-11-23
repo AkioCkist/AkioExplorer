@@ -34,8 +34,8 @@
                     <!-- Marks kept on the cloud service: colour label, favourite -->
                     <Ellipse Grid.Column="1" Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
                              Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" ToolTipService.ToolTip="{x:Bind LabelName, Mode=OneWay}" />
-                    <FontIcon Grid.Column="2" Glyph="&#xE735;" FontSize="12" VerticalAlignment="Center" Foreground="#F5C30F"
-                              Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" ToolTipService.ToolTip="Favourite" />
+                    <FontIcon Grid.Column="2" Glyph="&#xE735;" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource StarredBrush}"
+                              Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" ToolTipService.ToolTip="Starred" />
                 </Grid>
                 <TextBox Grid.Column="1" x:Name="RenameBox" x:Load="{x:Bind IsRenaming, Mode=OneWay}"
                          Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -78,7 +78,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-4,-2,0">
                     <Ellipse Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
                              Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" />
-                    <FontIcon Glyph="&#xE735;" FontSize="12" Foreground="#F5C30F" Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" />
+                    <FontIcon Glyph="&#xE735;" FontSize="12" Foreground="{ThemeResource StarredBrush}" Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" />
                 </StackPanel>
                 <StackPanel Grid.Row="1" Spacing="4" Visibility="{x:Bind conv:XamlHelpers.Visible(Columns.ShowTileNames), Mode=OneWay}">
                     <!-- Rename in grid view happens in a wide popup under the tile (RenamePopup), not in this narrow cell. -->
@@ -167,7 +167,7 @@
                     </MenuFlyoutItem>
                 </MenuFlyoutSubItem>
                 <!-- Items from installed apps (Git Bash here, Visual Studio, Everything…), added at runtime. -->
-                <MenuFlyoutSubItem x:Name="MenuBgShellMore" Text="More options">
+                <MenuFlyoutSubItem x:Name="MenuBgShellMore" Text="Windows menu">
                     <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE712;" /></MenuFlyoutSubItem.Icon>
                 </MenuFlyoutSubItem>
                 <MenuFlyoutSeparator />
@@ -220,7 +220,7 @@
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:PaneTab">
                     <TabViewItem Header="{x:Bind Title, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind Title, Mode=OneWay}">
-                        <TabViewItem.IconSource><FontIconSource Glyph="&#xE8B7;" /></TabViewItem.IconSource>
+                        <TabViewItem.IconSource><FontIconSource Glyph="{x:Bind Glyph, Mode=OneWay}" /></TabViewItem.IconSource>
                         <TabViewItem.ContextFlyout>
                             <MenuFlyout>
                                 <MenuFlyoutItem Text="Close tab" Click="OnCloseTabMenu" KeyboardAcceleratorTextOverride="Ctrl+W" />
@@ -446,12 +446,6 @@
                     <MenuFlyoutItem Text="Copy path" Command="{x:Bind ViewModel.CopyPathCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="Ctrl+Shift+C">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
-                    <MenuFlyoutItem x:Name="MenuShare" Text="Share…" Command="{x:Bind ViewModel.ShareCommand, Mode=OneWay}">
-                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72D;" /></MenuFlyoutItem.Icon>
-                    </MenuFlyoutItem>
-                    <MenuFlyoutItem x:Name="MenuCopyLink" Text="Copy link" Command="{x:Bind ViewModel.CopyLinkCommand, Mode=OneWay}">
-                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
-                    </MenuFlyoutItem>
                     <MenuFlyoutItem x:Name="MenuRename" Text="Rename" Command="{x:Bind ViewModel.RenameCommand, Mode=OneWay}" KeyboardAcceleratorTextOverride="F2">
                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AC;" /></MenuFlyoutItem.Icon>
                     </MenuFlyoutItem>
@@ -480,7 +474,14 @@
                     <!-- Marks and history kept on the cloud service (MEGA, Google Drive) -->
                     <MenuFlyoutSubItem x:Name="MenuCloud" Text="Cloud">
                         <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE753;" /></MenuFlyoutSubItem.Icon>
-                        <MenuFlyoutItem x:Name="MenuStar" Text="Add to favourites" Command="{x:Bind ViewModel.ToggleStarCommand, Mode=OneWay}">
+                        <!-- Sharing sits here, with the other service features, to keep the top level short. -->
+                        <MenuFlyoutItem x:Name="MenuShare" Text="Share…" Command="{x:Bind ViewModel.ShareCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72D;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuCopyLink" Text="Copy link" Command="{x:Bind ViewModel.CopyLinkCommand, Mode=OneWay}">
+                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71B;" /></MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem x:Name="MenuStar" Text="Star" Command="{x:Bind ViewModel.ToggleStarCommand, Mode=OneWay}">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE734;" /></MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <MenuFlyoutSubItem x:Name="MenuLabel" Text="Label">
@@ -541,10 +542,10 @@
                         <MenuFlyoutSeparator x:Name="MenuSendToSeparator" />
                     </MenuFlyoutSubItem>
                     <!-- Items from installed apps (WinRAR, Notepad++, Photos, Zalo, ShareX…), added at runtime. -->
-                    <MenuFlyoutSubItem x:Name="MenuShellMore" Text="More options">
+                    <MenuFlyoutSubItem x:Name="MenuShellMore" Text="Windows menu">
                         <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE712;" /></MenuFlyoutSubItem.Icon>
                     </MenuFlyoutSubItem>
-                    <MenuFlyoutSubItem x:Name="MenuTools" Text="More tools">
+                    <MenuFlyoutSubItem x:Name="MenuTools" Text="Tools">
                         <MenuFlyoutSubItem.Icon><FontIcon Glyph="&#xE90F;" /></MenuFlyoutSubItem.Icon>
                         <MenuFlyoutItem x:Name="MenuChecksum" Text="Checksums (MD5, SHA)…" Command="{x:Bind ViewModel.ChecksumCommand, Mode=OneWay}">
                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72E;" /></MenuFlyoutItem.Icon>
@@ -592,7 +593,7 @@
 
             <!-- Zoom bubble (browser style): appears on Ctrl+wheel / pinch / Ctrl +-0, hides itself after a moment. -->
             <Border x:Name="ZoomBubble" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,12,0"
-                    Padding="14,4,4,4" CornerRadius="8" BorderThickness="1" Opacity="0" IsHitTestVisible="False"
+                    Padding="12,4,4,4" CornerRadius="8" BorderThickness="1" Opacity="0" IsHitTestVisible="False"
                     Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}" BorderBrush="{ThemeResource GlassRimBrush}"
                     PointerEntered="OnZoomBubblePointerEntered" PointerExited="OnZoomBubblePointerExited">
                 <Border.OpacityTransition>
@@ -603,11 +604,11 @@
                                Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.LiveSetting="Polite" />
                     <Button Style="{StaticResource ToolIconButtonStyle}" Width="32" Click="OnZoomOutClick"
                             ToolTipService.ToolTip="Zoom out (Ctrl+Minus)" AutomationProperties.Name="Zoom out">
-                        <FontIcon Glyph="&#xE738;" FontSize="12" />
+                        <FontIcon Glyph="&#xE738;" FontSize="14" />
                     </Button>
                     <Button Style="{StaticResource ToolIconButtonStyle}" Width="32" Click="OnZoomInClick"
                             ToolTipService.ToolTip="Zoom in (Ctrl+Plus)" AutomationProperties.Name="Zoom in">
-                        <FontIcon Glyph="&#xE710;" FontSize="12" />
+                        <FontIcon Glyph="&#xE710;" FontSize="14" />
                     </Button>
                     <Button x:Name="ZoomResetButton" Content="Reset" Height="28" Padding="12,0" Margin="6,0,0,0" Click="OnZoomResetClick"
                             ToolTipService.ToolTip="Back to 100% (Ctrl+0)" />
@@ -649,7 +650,8 @@
         </Grid>
 
         <!-- Status bar -->
-        <Grid Grid.Row="4" Padding="14,2,8,4" ColumnSpacing="16">
+        <!-- 12 in from the edge: lines up with the row icons (4 margin + 8 padding) and the column headers. -->
+        <Grid Grid.Row="4" Padding="12,4,8,4" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -662,7 +664,7 @@
                         Visibility="Collapsed" Click="OnZoomStatusClick" Margin="0,0,4,0"
                         ToolTipService.ToolTip="Zoom (Ctrl+wheel or pinch) · click to change or reset">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE71E;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <FontIcon Glyph="&#xE71E;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock x:Name="ZoomStatusText" Style="{StaticResource StatusTextStyle}" />
                     </StackPanel>
                 </Button>

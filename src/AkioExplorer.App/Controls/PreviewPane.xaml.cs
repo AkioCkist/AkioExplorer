@@ -38,7 +38,6 @@ public sealed partial class PreviewPane : UserControl
     ];
 
     private CancellationTokenSource? _cts;
-    private MediaPlayerElement? _media;
     private FileItemViewModel? _headerItem;
     private string? _shownKey;
     private readonly List<PreviewDetail> _details = new();
@@ -239,121 +238,6 @@ public sealed partial class PreviewPane : UserControl
         if (document.PageCount > maxPages) ShowNote($"First {maxPages} of {document.PageCount} pages");
     }
 
-    /// <summary>
-    /// Music: the cover on top (whole, never under the controls) and the transport bar below it.
-    /// Video: the player sized to the video's own shape inside the pane, so there are no black bars and the controls
-    /// sit on the picture, whatever the pane's width or height.
-    /// </summary>
-    private async Task ShowMediaAsync(string path, CancellationToken ct)
-    {
-        EnsureMediaElements();
-        bool audio = FileCategories.Of(Path.GetFileName(path), isFolder: false) == FileCategory.Audio;
-        _audio = audio;
-        _videoAspect = 16.0 / 9;
-
-        var file = await StorageFile.GetFileFromPathAsync(path);
-        ct.ThrowIfCancellationRequested();
-        var picture = await ThumbnailAsync(file, ThumbnailMode.SingleItem, ct);
-        ct.ThrowIfCancellationRequested();
-
-        if (audio)
-        {
-            // A cover only when the file has one; otherwise a note glyph instead of the shell's generic icon.
-            bool hasCover = picture is not null && await HasPictureAsync(file);
-            _art!.Source = hasCover ? picture : null;
-            _art.Visibility = hasCover ? Visibility.Visible : Visibility.Collapsed;
-            _artGlyph!.Visibility = hasCover ? Visibility.Collapsed : Visibility.Visible;
-            _media!.PosterSource = null;
-        }
-        else
-        {
-            _art!.Visibility = Visibility.Collapsed;
-            _artGlyph!.Visibility = Visibility.Collapsed;
-            _media!.PosterSource = picture;
-            if (picture is { PixelWidth: > 0, PixelHeight: > 0 }) _videoAspect = (double)picture.PixelWidth / picture.PixelHeight;
-        }
-        _media.Source = MediaSource.CreateFromStorageFile(file);
-        MediaHost.Visibility = Visibility.Visible;
-        LayoutMedia();
-    }
-
-    private bool _audio;
-    private double _videoAspect = 16.0 / 9;
-    private Image? _art;
-    private FontIcon? _artGlyph;
-
-    /// <summary>Bar height of the compact transport controls (play, seek, time, volume).</summary>
-    private const double ControlsHeight = 52;
-
-    private void EnsureMediaElements()
-    {
-        if (_media is not null) return;
-        MediaHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        MediaHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        _art = new Image { Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform, Margin = new Thickness(8, 8, 8, 0) };
-        _artGlyph = new FontIcon { Glyph = "", FontSize = 56, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"] };
-        MediaHost.Children.Add(_art);
-        MediaHost.Children.Add(_artGlyph);
-
-        _media = new MediaPlayerElement
-        {
-            AreTransportControlsEnabled = true,
-            AutoPlay = false,
-            Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        _media.TransportControls.IsCompact = true;
-        _media.TransportControls.IsZoomButtonVisible = false;
-        MediaHost.Children.Add(_media);
-        MediaHost.SizeChanged += (_, _) => LayoutMedia();
-        _media.MediaPlayer.MediaOpened += (player, _) =>
-        {
-            // The real frame size (the thumbnail can be letterboxed by the shell).
-            uint w = player.PlaybackSession.NaturalVideoWidth, h = player.PlaybackSession.NaturalVideoHeight;
-            if (w > 0 && h > 0)
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    _videoAspect = (double)w / h;
-                    LayoutMedia();
-                });
-        };
-    }
-
-    private void LayoutMedia()
-    {
-        if (_media is null) return;
-        double width = MediaHost.ActualWidth, height = MediaHost.ActualHeight;
-        if (width <= 0 || height <= 0) return;
-
-        if (_audio)
-        {
-            Grid.SetRow(_media, 1);
-            Grid.SetRowSpan(_media, 1);
-            _media.Width = double.NaN;
-            _media.Height = ControlsHeight;
-            _media.HorizontalAlignment = HorizontalAlignment.Stretch;
-            _media.VerticalAlignment = VerticalAlignment.Bottom;
-            return;
-        }
-
-        // Video: the largest box of the video's shape that fits; never narrower than the controls need.
-        Grid.SetRow(_media, 0);
-        Grid.SetRowSpan(_media, 2);
-        double w = Math.Min(width, height * _videoAspect);
-        double h = w / _videoAspect;
-        if (w < Math.Min(width, 260))
-        {
-            w = Math.Min(width, 260); // very tall video in a narrow pane: keep the controls usable
-            h = Math.Min(height, w / _videoAspect);
-        }
-        _media.Width = w;
-        _media.Height = Math.Max(h, Math.Min(height, ControlsHeight * 2));
-        _media.HorizontalAlignment = HorizontalAlignment.Center;
-        _media.VerticalAlignment = VerticalAlignment.Center;
-    }
-
     /// <summary>True when the shell's picture for a music file is real cover art (not the type icon).</summary>
     private static async Task<bool> HasPictureAsync(StorageFile file)
     {
@@ -454,22 +338,16 @@ public sealed partial class PreviewPane : UserControl
         _details.Add(new("Type", typeName));
         if (isLocal && Path.GetDirectoryName(item.Path) is { Length: > 0 } folder) _details.Add(new("Location", folder));
         if (item.Created is { } created) _details.Add(new("Created", created.LocalDateTime.ToString("g")));
-        if (item.Modified is { } modified)
-        {
-            _details.Add(new("Modified", modified.LocalDateTime.ToString("g")));
-            _details.Add(new("Age", DetailFormatting.Age(modified, DateTimeOffset.Now)));
-        }
-        if (item.Kind == StorageItemKind.File && item.Size is { } size)
-        {
-            _details.Add(new("Size", DetailFormatting.Bytes(size)));
-            _details.Add(new("Size (MB)", DetailFormatting.Decimal(size)));
-            _details.Add(new("Size (MiB)", DetailFormatting.Binary(size)));
-        }
+        if (item.Modified is { } modified) _details.Add(new("Modified", DetailFormatting.DateWithAge(modified, DateTimeOffset.Now)));
+        // One line in the units chosen in Settings, exact count in brackets (no MB / MiB / bytes triplet).
+        if (item.Kind == StorageItemKind.File && item.Size is { } size) _details.Add(new("Size", DetailFormatting.SizeSummary(size)));
         if (isLocal)
         {
             try
             {
-                _details.Add(new("Attributes", DetailFormatting.Attributes(File.GetAttributes(item.Path))));
+                // Only attributes that mean something (Read-only, Hidden…), in words; nothing for a plain file.
+                if (DetailFormatting.AttributeNames(File.GetAttributes(item.Path)) is { } attributes)
+                    _details.Add(new("Attributes", attributes));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -594,9 +472,7 @@ public sealed partial class PreviewPane : UserControl
         _details.Clear();
         if (files > 0)
         {
-            _details.Add(new("Files size", DetailFormatting.Bytes(bytes)));
-            _details.Add(new("Size (MB)", DetailFormatting.Decimal(bytes)));
-            _details.Add(new("Size (MiB)", DetailFormatting.Binary(bytes)));
+            _details.Add(new("Files size", DetailFormatting.SizeSummary(bytes)));
         }
         if (selected.Select(s => s.Item.Modified).Where(m => m is not null).ToList() is { Count: > 0 } dates)
             _details.Add(new("Modified", $"{dates.Min()!.Value.LocalDateTime:g} – {dates.Max()!.Value.LocalDateTime:g}"));
@@ -661,14 +537,6 @@ public sealed partial class PreviewPane : UserControl
     {
         ContentNote.Text = text;
         ContentNote.Visibility = Visibility.Visible;
-    }
-
-    private void StopMedia()
-    {
-        if (_media is null) return;
-        _media.MediaPlayer?.Pause();
-        _media.Source = null;
-        _media.PosterSource = null;
     }
 
     private int DecodeWidth() => (int)Math.Max(ContentHost.ActualWidth > 0 ? ContentHost.ActualWidth : ActualWidth, 240);

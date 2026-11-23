@@ -51,6 +51,9 @@ public sealed class GlobalHotkey : IDisposable
     /// <summary>Why the wanted hotkey isn't working, or empty when it is (shown under the setting).</summary>
     public string Status { get; private set; } = string.Empty;
 
+    /// <summary>True when <see cref="Status"/> asks the user to act (key taken), false for a chosen state (paused).</summary>
+    public bool StatusNeedsAction => Status.Length > 0 && !_paused;
+
     /// <summary>Registers <paramref name="gesture"/> (null turns the hotkey off). Returns false when another app owns it.</summary>
     public bool Set(HotkeyGesture? gesture)
     {
@@ -91,7 +94,7 @@ public sealed class GlobalHotkey : IDisposable
         KillTimer(_hwnd, RetryTimerId);
         if (_suspended || _paused || _wanted is not { IsValid: true } wanted || _hwnd == IntPtr.Zero)
         {
-            SetStatus(_paused && _wanted is not null ? "Paused from the notification-area icon (Pause hotkey)." : string.Empty);
+            SetStatus(_paused && _wanted is not null ? "Paused from the notification-area icon (Pause hotkey)" : string.Empty);
             return _wanted is null || _suspended || _paused;
         }
 

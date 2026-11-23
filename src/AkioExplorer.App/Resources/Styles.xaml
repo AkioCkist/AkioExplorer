@@ -35,6 +35,8 @@
                 <GradientStop Offset="0" Color="#40000000" />
                 <GradientStop Offset="1" Color="#1FFFFFFF" />
             </LinearGradientBrush>
+            <!-- Starred on the cloud service. Amber, theme-aware: the light variant keeps 3:1 on white glass. -->
+            <SolidColorBrush x:Key="StarredBrush" Color="#E5B209" />
             <!-- The panes draw their own glass, so NavigationView's flat content layer goes away. -->
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
@@ -60,6 +62,7 @@
                 <GradientStop Offset="0" Color="#1F000000" />
                 <GradientStop Offset="1" Color="#CCFFFFFF" />
             </LinearGradientBrush>
+            <SolidColorBrush x:Key="StarredBrush" Color="#A88608" />
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
         </ResourceDictionary>
@@ -70,6 +73,7 @@
             <SolidColorBrush x:Key="GlassInsetBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="GlassInsetBackgroundPointerOverBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="GlassInsetBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="StarredBrush" Color="{ThemeResource SystemColorHighlightColor}" />
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
         </ResourceDictionary>
@@ -81,6 +85,9 @@
     <!-- Spacing (Microsoft guidance): 8 between buttons, 12 between content areas, 16 surface to edge. -->
     <Thickness x:Key="PaneBarPadding">8,6,8,6</Thickness>
     <x:Double x:Key="RowHeight">32</x:Double>
+
+    <!-- Sidebar rows: 32 + the template's 2 + 2 margin = 36 apart (default 40), closer to the file list's density. -->
+    <x:Double x:Key="NavigationViewItemOnLeftMinHeight">32</x:Double>
 
     <!-- Compact icon button for navigation bars: transparent at rest, native hover/pressed states. -->
     <Style x:Key="ToolIconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
