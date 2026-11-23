@@ -181,4 +181,7 @@ public sealed class AppSettings
 
     /// <summary>How often each path was opened from quick search (ranks favourites first). Trimmed to the top 300.</summary>
     public Dictionary<string, int> QuickSearchLaunches { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What was opened from quick search and what was typed for it: the start of that text finds it again.</summary>
+    public List<Logic.QuickSearchHistoryEntry> QuickSearchHistory { get; set; } = new();
 }

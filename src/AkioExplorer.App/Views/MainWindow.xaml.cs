@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private readonly CloudAccountsViewModel _cloud;
     private const string AddAccountTag = "add-cloud-account";
     private const string TransfersTag = "transfers";
+    private const string NewTabTag = "new-tab";
     private NavigationViewItem? _transfersItem;
     private bool _initialized;
     private bool _ready;
@@ -39,6 +40,7 @@ public sealed partial class MainWindow : Window
     private bool _exitRequested;
     private bool _shutDown;
     private LaunchRequest? _pendingLaunch;
+    private string? _pendingLink;
 
     public MainWindow(MainViewModel viewModel, ISettingsService settings, ThemeService theme, DialogService dialogs, FavoritesService favorites, ILogger<MainWindow> logger, CloudAccountsViewModel cloud)
     {
@@ -67,7 +69,6 @@ public sealed partial class MainWindow : Window
         App.Services.GetRequiredService<AkioExplorer.Infrastructure.Shell.ShellMenuService>().OwnerWindow = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
         RootGrid.Loaded += OnRootLoaded;
-        RootGrid.Loaded += (_, _) => UpdateNewTabButton();
         RootGrid.SizeChanged += (_, _) => UpdateContentWidth();
         Nav.DisplayModeChanged += (_, _) => UpdateContentWidth();
         // Size the content for the pane's target state as soon as the toggle starts (IsPaneOpen is already the new
@@ -75,9 +76,6 @@ public sealed partial class MainWindow : Window
         // toolbar and re-flowed its "More" overflow at the end – the visible jerk.
         Nav.PaneOpening += (_, _) => UpdateContentWidth();
         Nav.PaneClosing += (_, _) => UpdateContentWidth();
-        Nav.PaneOpening += (_, _) => UpdateNewTabButton();
-        Nav.PaneClosing += (_, _) => UpdateNewTabButton();
-        Nav.DisplayModeChanged += (_, _) => UpdateNewTabButton();
         // Upload / Download show only on cloud folders: the toolbar's spacing is worked out again when they come or go.
         foreach (var command in Toolbar.PrimaryCommands.OfType<UIElement>())
             command.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => QueueToolbarJustify());
@@ -137,6 +135,11 @@ public sealed partial class MainWindow : Window
         {
             _pendingLaunch = null;
             await OpenExternalAsync(pending.Path!);
+        }
+        if (_pendingLink is { } link)
+        {
+            _pendingLink = null;
+            await OpenLinkFromQuickSearchAsync(link);
         }
         _ = WarmUpShellMenusAsync();
         // Build the (hidden) quick-search popup now, so the first hotkey press shows it at once.
@@ -309,8 +312,22 @@ public sealed partial class MainWindow : Window
         if (_quickSearch is not null) return _quickSearch;
         _quickSearch = App.Services.GetRequiredService<QuickSearchWindow>();
         _quickSearch.ViewModel.ShowInExplorer = path => HandleLaunch(new LaunchRequest(path, false));
+        _quickSearch.ViewModel.OpenLinkInExplorer = link =>
+        {
+            if (_ready) _ = OpenLinkFromQuickSearchAsync(link);
+            else _pendingLink = link;
+            ShowAndActivate();
+        };
         _quickSearch.ViewModel.Prepare(); // app list ready before the first hotkey press
         return _quickSearch;
+    }
+
+    /// <summary>A link picked in quick search (Google Drive, MEGA, ftp://…): its own tab, like the sidebar's New tab.</summary>
+    private async Task OpenLinkFromQuickSearchAsync(string link)
+    {
+        ShowExplorer();
+        await ViewModel.ActivePane.OpenLinkInNewTabAsync(link);
+        ViewFor(ViewModel.ActivePane).FocusList();
     }
 
     private void ToggleQuickSearch() => EnsureQuickSearch().Toggle();
@@ -582,6 +599,9 @@ public sealed partial class MainWindow : Window
     {
         Nav.MenuItems.Clear();
 
+        // New tab: a plain row like the rest, so the NavigationView lines it up in every pane state (open, compact,
+        // minimal). Opens a tab with the address bar ready for a path or a pasted cloud/FTP link.
+        Nav.MenuItems.Add(NewTabNavItem());
         Nav.MenuItems.Add(CreateNavItem("Home", "", MainViewModel.Home, "This PC: your folders and drives"));
         // One entry: the page itself has Queue and Recent tabs.
         _transfersItem = new NavigationViewItem { Content = "Transfers", Icon = new FontIcon { Glyph = "" }, Tag = TransfersTag };
@@ -668,6 +688,36 @@ public sealed partial class MainWindow : Window
         return clash ? account.Account.Email ?? account.Account.UserName ?? account.Name : name;
     }
 
+    /// <summary>"New tab" with the shortcut as quiet secondary text at the right edge (hidden with the label when collapsed).</summary>
+    private static NavigationViewItem NewTabNavItem()
+    {
+        var keys = new TextBlock
+        {
+            Text = "Ctrl+T",
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+        };
+        Grid.SetColumn(keys, 1);
+        var content = new Grid
+        {
+            ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition { Width = GridLength.Auto } },
+            Children = { new TextBlock { Text = "New tab", VerticalAlignment = VerticalAlignment.Center }, keys },
+        };
+        var item = new NavigationViewItem
+        {
+            Content = content,
+            Icon = new FontIcon { Glyph = "" },
+            Tag = NewTabTag,
+            SelectsOnInvoked = false,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, "New tab");
+        ToolTipService.SetToolTip(item, "New tab: type a path, or paste a Google Drive, Dropbox, OneDrive, Box, MEGA, MediaFire or FTP link (Ctrl+T)");
+        return item;
+    }
+
     private static NavigationViewItem CreateNavItem(string text, string glyph, StorageLocation location, string tooltip)
     {
         var item = new NavigationViewItem
@@ -698,6 +748,13 @@ public sealed partial class MainWindow : Window
         if (args.IsSettingsInvoked)
         {
             ShowSettings();
+            return;
+        }
+
+        if (args.InvokedItemContainer?.Tag is NewTabTag)
+        {
+            ShowExplorer();
+            await ViewModel.ActivePane.NewTabForAddressAsync();
             return;
         }
 
@@ -1352,24 +1409,6 @@ public sealed partial class MainWindow : Window
         a.Handled = true;
         ViewModel.ShowHiddenItems = !ViewModel.ShowHiddenItems;
         ViewModel.ActivePane.ShowMessage(ViewModel.ShowHiddenItems ? "Hidden items are shown." : "Hidden items are hidden.", isError: false);
-    }
-
-    private async void OnNewTabButtonClick(object sender, RoutedEventArgs e)
-    {
-        ShowExplorer();
-        await ViewModel.ActivePane.NewTabForAddressAsync();
-    }
-
-    /// <summary>Collapsed pane (48 px): just the + icon, centred.</summary>
-    private void UpdateNewTabButton()
-    {
-        bool open = Nav.IsPaneOpen || Nav.DisplayMode == NavigationViewDisplayMode.Minimal;
-        var labels = open ? Visibility.Visible : Visibility.Collapsed;
-        NewTabLabel.Visibility = labels;
-        NewTabKeys.Visibility = labels;
-        NewTabButton.Margin = open ? new Thickness(8, 6, 8, 10) : new Thickness(4, 6, 4, 10);
-        NewTabButton.Padding = open ? new Thickness(12, 0, 12, 0) : new Thickness(0);
-        NewTabButton.HorizontalContentAlignment = open ? HorizontalAlignment.Stretch : HorizontalAlignment.Center;
     }
 
     /// <summary>Tab commands change the listing: keep the keyboard in the list afterwards.</summary>

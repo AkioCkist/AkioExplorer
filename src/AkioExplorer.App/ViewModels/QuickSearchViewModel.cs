@@ -21,6 +21,8 @@ public enum QuickResultKind
     Hint,
     /// <summary>The typed text is arithmetic; <see cref="QuickSearchResult.Path"/> holds the answer to copy.</summary>
     Calculator,
+    /// <summary>A link the app browses itself (Google Drive, MEGA, ftp://…); <see cref="QuickSearchResult.Path"/> is the link.</summary>
+    Link,
 }
 
 /// <summary>One row of the quick-search popup.</summary>
@@ -105,6 +107,9 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     /// <summary>Opens a folder (or a file's folder, file selected) in the AkioExplorer window.</summary>
     public Action<string>? ShowInExplorer { get; set; }
 
+    /// <summary>Opens a pasted link (Google Drive, MEGA, ftp://…) in a new AkioExplorer tab.</summary>
+    public Action<string>? OpenLinkInExplorer { get; set; }
+
     /// <summary>Raised after something was opened, so the popup can hide.</summary>
     public event EventHandler? Opened;
 
@@ -154,7 +159,12 @@ public sealed partial class QuickSearchViewModel : ObservableObject
             await Task.Delay(Debounce, cts.Token);
             var launches = _settings.Current.QuickSearchLaunches;
             var apps = _apps;
-            var found = await Task.Run(() => Collect(query, apps, launches, cts.Token), cts.Token);
+            // Snapshot: the history is changed on this thread when something is opened, read on the search thread.
+            var history = _settings.Current.QuickSearchHistory.Select(e => new QuickSearchHistoryEntry
+            {
+                Path = e.Path, Name = e.Name, Kind = e.Kind, LastOpened = e.LastOpened, Count = e.Count, Queries = [.. e.Queries],
+            }).ToList();
+            var found = await Task.Run(() => Collect(query, apps, launches, history, cts.Token), cts.Token);
             if (!cts.IsCancellationRequested) Show(found, generation);
         }
         catch (OperationCanceledException)
@@ -167,7 +177,7 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     }
 
     private static List<QuickSearchResult> Collect(string query, IReadOnlyList<LauncherApp> apps, Dictionary<string, int> launches,
-        CancellationToken cancellationToken)
+        List<QuickSearchHistoryEntry> history, CancellationToken cancellationToken)
     {
         var results = new List<QuickSearchResult>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -190,8 +200,38 @@ public sealed partial class QuickSearchViewModel : ObservableObject
             seen.Add(query);
         }
 
+        // Opened before: found from the history itself (Everything may not return it for a short prefix), and first
+        // when the typed text starts what was typed back then ("uni" after "unikey").
+        var now = DateTimeOffset.Now;
+        foreach (var entry in history)
+        {
+            if (seen.Contains(entry.Path)) continue;
+            bool learned = QuickSearchHistory.IsLearned(entry, query);
+            int match = QuickSearchRanker.Score(query, entry.Name, entry.Path, entry.Kind, Launches(entry.Path));
+            if (!learned && match <= 0) continue;
+            bool folder = entry.Kind == QuickCandidateKind.Folder;
+            if (folder ? !Directory.Exists(entry.Path) : !File.Exists(entry.Path)) continue; // moved or deleted since
+            seen.Add(entry.Path);
+            results.Add(new QuickSearchResult
+            {
+                Kind = entry.Kind switch
+                {
+                    QuickCandidateKind.App => QuickResultKind.App,
+                    QuickCandidateKind.Folder => QuickResultKind.Folder,
+                    _ => QuickResultKind.File,
+                },
+                Title = entry.Name,
+                Subtitle = entry.Kind == QuickCandidateKind.App ? entry.Path : System.IO.Path.GetDirectoryName(entry.Path) ?? entry.Path,
+                Path = entry.Path,
+                Glyph = folder ? "" : entry.Kind == QuickCandidateKind.App ? "" : "",
+                Item = ToItem(entry.Path, folder),
+                Score = Math.Max(match, 0) + QuickSearchHistory.Boost(entry, query, now),
+            });
+        }
+
         foreach (var app in apps)
         {
+            if (seen.Contains(app.Path)) continue;
             int score = QuickSearchRanker.Score(query, app.Name, app.Path, QuickCandidateKind.App, Launches(app.Path));
             if (score <= 0) continue;
             seen.Add(app.Path);
@@ -208,7 +248,8 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        var files = FindFiles(query, cancellationToken);
+        // A link names no file on this PC: no index search (and no "start Everything" hint under it).
+        var files = SharedLinks.TryParseLink(query, out _) && !LooksLikePath(query) ? [] : FindFiles(query, cancellationToken);
         if (files is null)
         {
             results.Add(new QuickSearchResult
@@ -256,6 +297,10 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         ranked.Insert(Math.Min(1, ranked.Count), web);
         ranked.AddRange(results.Where(r => r.Kind == QuickResultKind.Hint));
 
+        // A typed or pasted link: open it (in the app when it can browse it, else the browser) before anything else.
+        if (!LooksLikePath(query) && SharedLinks.TryParseLink(query, out var link))
+            ranked.InsertRange(0, LinkResults(link));
+
         // Arithmetic ("2+2*0.231314/2"): the answer goes on top, Enter copies it.
         if (Calculator.TryEvaluate(query, out double value))
         {
@@ -270,6 +315,60 @@ public sealed partial class QuickSearchViewModel : ObservableObject
             });
         }
         return ranked;
+    }
+
+    /// <summary>
+    /// Rows for a link: "Open in AkioExplorer" for links the app browses (cloud shares, ftp://, sftp://, file:///),
+    /// "Open in browser" for http(s) pages. A cloud share gets both, the app first.
+    /// </summary>
+    private static List<QuickSearchResult> LinkResults(Uri link)
+    {
+        var rows = new List<QuickSearchResult>();
+        string url = link.OriginalString;
+
+        if (SharedLinks.TryGetLocalPath(link) is { } local)
+        {
+            bool folder = Directory.Exists(local);
+            if (folder || File.Exists(local))
+            {
+                rows.Add(new QuickSearchResult
+                {
+                    Kind = QuickResultKind.Location,
+                    Title = local,
+                    Subtitle = folder ? "Open folder" : "Open file",
+                    Path = local,
+                    Glyph = folder ? "" : "",
+                    Item = ToItem(local, folder),
+                });
+            }
+            return rows;
+        }
+
+        if (SharedLinks.BrowsableService(link) is { } service)
+        {
+            bool server = link.Scheme is not ("http" or "https");
+            rows.Add(new QuickSearchResult
+            {
+                Kind = QuickResultKind.Link,
+                Title = server ? $"{link.Scheme}://{link.Host}{(link.IsDefaultPort ? "" : ":" + link.Port)}{Uri.UnescapeDataString(link.AbsolutePath)}" : url,
+                Subtitle = server ? $"Connect to {service} server in AkioExplorer" : $"Open {service} link in AkioExplorer",
+                Path = url,
+                Glyph = server ? "" : "",
+            });
+        }
+
+        if (link.Scheme is "http" or "https")
+        {
+            rows.Add(new QuickSearchResult
+            {
+                Kind = QuickResultKind.Web,
+                Title = url,
+                Subtitle = "Open in browser",
+                Path = link.AbsoluteUri,
+                Glyph = "",
+            });
+        }
+        return rows;
     }
 
     /// <summary>
@@ -327,7 +426,7 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     private void UpdateCompletion()
     {
         string typed = Query;
-        Completion = Selected is { Kind: not QuickResultKind.Web and not QuickResultKind.Hint and not QuickResultKind.Calculator } s &&
+        Completion = Selected is { Kind: not QuickResultKind.Web and not QuickResultKind.Hint and not QuickResultKind.Calculator and not QuickResultKind.Link } s &&
                      typed.Length > 0 && s.Title.Length > typed.Length && s.Title.StartsWith(typed, StringComparison.OrdinalIgnoreCase)
             ? s.Title[typed.Length..]
             : string.Empty;
@@ -344,7 +443,7 @@ public sealed partial class QuickSearchViewModel : ObservableObject
     /// <summary>Tab: takes the selected name into the box (to keep typing a longer path or refine).</summary>
     public bool AcceptCompletion()
     {
-        if (Selected is not { } s || s.Kind is QuickResultKind.Web or QuickResultKind.Hint) return false;
+        if (Selected is not { } s || s.Kind is QuickResultKind.Web or QuickResultKind.Hint or QuickResultKind.Link) return false;
         string text = s.Kind == QuickResultKind.Calculator ? s.Path : s.Title; // the answer, to keep calculating
         if (string.Equals(Query, text, StringComparison.Ordinal)) return false;
         Query = text;
@@ -372,6 +471,10 @@ public sealed partial class QuickSearchViewModel : ObservableObject
             {
                 _shell.Open(result.Path);
             }
+            else if (result.Kind == QuickResultKind.Link)
+            {
+                OpenLinkInExplorer?.Invoke(result.Path);
+            }
             else if (inFolder || result.Kind == QuickResultKind.Folder ||
                      (result.Kind == QuickResultKind.Location && Directory.Exists(result.Path)))
             {
@@ -386,7 +489,7 @@ public sealed partial class QuickSearchViewModel : ObservableObject
                 _shell.Open(result.Path);
             }
 
-            if (result.IsOnDisk) Remember(result.Path);
+            if (result.IsOnDisk) Remember(result);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -401,8 +504,21 @@ public sealed partial class QuickSearchViewModel : ObservableObject
         Opened?.Invoke(this, EventArgs.Empty);
     }
 
-    private void Remember(string path)
+    private void Remember(QuickSearchResult result)
     {
+        string path = result.Path;
+        var kind = result.Kind switch
+        {
+            QuickResultKind.App => QuickCandidateKind.App,
+            QuickResultKind.Folder => QuickCandidateKind.Folder,
+            QuickResultKind.Location when Directory.Exists(path) => QuickCandidateKind.Folder,
+            _ => QuickCandidateKind.File,
+        };
+        string name = result.Kind == QuickResultKind.Location
+            ? System.IO.Path.GetFileName(path.TrimEnd('\\')) is { Length: > 0 } n ? n : path
+            : result.Title;
+        QuickSearchHistory.Record(_settings.Current.QuickSearchHistory, Query, path, name, kind, DateTimeOffset.Now);
+
         var launches = _settings.Current.QuickSearchLaunches;
         string key = path.ToLowerInvariant();
         launches[key] = launches.GetValueOrDefault(key) + 1;

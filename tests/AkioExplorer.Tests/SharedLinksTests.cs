@@ -131,6 +131,26 @@ public sealed class SharedLinksTests
     [InlineData("https://example.com/s/abc", false)]
     public void Reads_box_links(string url, bool expected) => Assert.Equal(expected, SharedLinks.TryParseBox(new Uri(url)));
 
+    [Theory]
+    [InlineData("ftp://user:pw@example.com/pub", "FTP")]
+    [InlineData("sftp://example.com", "SFTP")]
+    [InlineData("ftpes://example.com", "FTPS")]
+    [InlineData("https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp", "Google Drive")]
+    [InlineData("https://mega.nz/folder/AbCdEfGh#0123456789abcdefABCDEF", "MEGA")]
+    [InlineData("https://mega.nz/#F!AbCdEfGh!0123456789abcdef", "MEGA")]
+    [InlineData("https://www.mediafire.com/folder/abc123def4567/name", "MediaFire")]
+    [InlineData("https://www.dropbox.com/scl/fo/abc/xyz?rlkey=1", "Dropbox")]
+    [InlineData("https://1drv.ms/f/s!AbCdEf", "OneDrive")]
+    [InlineData("https://app.box.com/s/abcdef", "Box")]
+    public void Names_browsable_services(string url, string service) =>
+        Assert.Equal(service, SharedLinks.BrowsableService(new Uri(url)));
+
+    [Theory]
+    [InlineData("https://impeccable.style/")]
+    [InlineData("https://mega.nz/")]
+    [InlineData("https://drive.google.com/")]
+    public void Plain_web_pages_have_no_service(string url) => Assert.Null(SharedLinks.BrowsableService(new Uri(url)));
+
     [Fact]
     public void Web_links_are_not_servers()
     {

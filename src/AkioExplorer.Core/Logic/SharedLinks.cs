@@ -196,6 +196,36 @@ public static partial class SharedLinks
         return segments.Length >= 2 && segments[0] is "s" or "v";
     }
 
+    /// <summary>
+    /// The service whose files the app can browse from <paramref name="link"/> ("Google Drive", "MEGA", "FTP"…), or
+    /// null for an ordinary web page. Only says what the link looks like; opening it can still fail.
+    /// </summary>
+    public static string? BrowsableService(Uri link)
+    {
+        if (TryParseServer(link, out var server))
+            return server.Scheme switch { "sftp" => "SFTP", "ftps" or "ftpes" => "FTPS", _ => "FTP" };
+        if (TryGetGoogleDriveId(link, out _, out _)) return "Google Drive";
+        if (IsMegaLink(link)) return "MEGA";
+        if (TryParseMediaFire(link, out _, out _)) return "MediaFire";
+        if (TryParseDropbox(link, out _)) return "Dropbox";
+        if (TryParseOneDrive(link, out _)) return "OneDrive";
+        if (TryParseBox(link)) return "Box";
+        return null;
+    }
+
+    /// <summary>mega.nz/file/…, mega.nz/folder/… and the older #!… / #F!… forms (key checked when opened).</summary>
+    private static bool IsMegaLink(Uri link)
+    {
+        string host = link.Host.ToLowerInvariant();
+        if (!host.EndsWith("mega.nz", StringComparison.Ordinal) && !host.EndsWith("mega.co.nz", StringComparison.Ordinal) &&
+            !host.EndsWith("mega.io", StringComparison.Ordinal))
+            return false;
+        string path = link.AbsolutePath.Trim('/');
+        string fragment = link.Fragment.TrimStart('#');
+        return (path.StartsWith("file/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("folder/", StringComparison.OrdinalIgnoreCase)) && fragment.Length > 0
+               || fragment.StartsWith('!') || fragment.StartsWith("F!", StringComparison.Ordinal);
+    }
+
     /// <summary>file:///C:/folder → C:\folder (and \\server\share for file://server/share).</summary>
     public static string? TryGetLocalPath(Uri link) => link.IsFile ? link.LocalPath : null;
 

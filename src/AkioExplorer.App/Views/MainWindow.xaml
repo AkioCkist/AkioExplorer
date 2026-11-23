@@ -77,25 +77,6 @@
                         IsTitleBarAutoPaddingEnabled="False" OpenPaneLength="240"
                         CompactModeThresholdWidth="760" ExpandedModeThresholdWidth="1000"
                         ItemInvoked="OnNavItemInvoked">
-            <!-- New tab: the big first thing in the sidebar. Opens a tab with the address bar ready for a path or a
-                 pasted link (Google Drive, MEGA, MediaFire, ftp://…). Icon-only when the pane is collapsed. -->
-            <NavigationView.PaneCustomContent>
-                <Button x:Name="NewTabButton" Style="{StaticResource AccentButtonStyle}" Click="OnNewTabButtonClick"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Height="42" Margin="8,6,8,10"
-                        Padding="12,0" CornerRadius="8" AutomationProperties.Name="New tab"
-                        ToolTipService.ToolTip="New tab: type a path, or paste a Google Drive, Dropbox, OneDrive, Box, MEGA, MediaFire or FTP link (Ctrl+T)">
-                    <Grid ColumnSpacing="10">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Glyph="&#xE710;" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" />
-                        <TextBlock x:Name="NewTabLabel" Grid.Column="1" Text="New tab" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
-                        <TextBlock x:Name="NewTabKeys" Grid.Column="2" Text="Ctrl+T" FontSize="12" Opacity="0.75" VerticalAlignment="Center" />
-                    </Grid>
-                </Button>
-            </NavigationView.PaneCustomContent>
             <Grid x:Name="ContentRoot">
                 <Grid x:Name="ExplorerHost">
                     <Grid.RowDefinitions>

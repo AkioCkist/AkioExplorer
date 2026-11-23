@@ -108,6 +108,20 @@ public sealed partial class FilePaneViewModel
         RequestAddressEdit();
     }
 
+    /// <summary>
+    /// A link from quick search (Google Drive, MEGA, ftp://…): a new tab, then the link opened in it the same way as
+    /// when pasted into the address bar.
+    /// </summary>
+    public async Task OpenLinkInNewTabAsync(string link)
+    {
+        if (Location is null) return;
+        var tab = new PaneTab();
+        tab.Describe(_registry.Find(Location.ProviderId), Location);
+        Tabs.Insert(ActiveTabIndex + 1, tab);
+        await SwitchToTabAsync(tab);
+        await NavigateToTypedPathAsync(link);
+    }
+
     /// <summary>Opens <paramref name="location"/> in a new tab right after the current one.</summary>
     public void OpenInNewTab(StorageLocation location, bool activate)
     {
