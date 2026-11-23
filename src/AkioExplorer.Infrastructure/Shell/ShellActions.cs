@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AkioExplorer.Core.Abstractions;
+using AkioExplorer.Core.Logic;
 using AkioExplorer.Core.Models;
 using static AkioExplorer.Infrastructure.Shell.NativeMethods;
 
@@ -96,6 +97,54 @@ public sealed class ShellActions : IShellActions
         catch (Exception ex)
         {
             throw new StorageException(StorageErrorKind.Unknown, $"Couldn't open a terminal: {ex.Message}", ex);
+        }
+    }
+
+    public bool RunCommand(string commandLine, string folder)
+    {
+        if (!AddressCommand.TryParse(commandLine, out var program, out var arguments)) return false;
+        RefreshPath();
+        try
+        {
+            // ShellExecute, like Win+R: finds programs on PATH (with PATHEXT, so code.cmd) and in App Paths,
+            // opens URLs and documents, and shows UAC for programs that need it.
+            Process.Start(new ProcessStartInfo(program, AddressCommand.TerminalArguments(program, arguments, folder))
+            {
+                UseShellExecute = true,
+                WorkingDirectory = folder,
+            })?.Dispose();
+            return true;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is 2 or 3) // file / path not found
+        {
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223) // UAC cancelled
+        {
+            return true;
+        }
+        catch (Exception ex)
+        {
+            throw new StorageException(StorageErrorKind.Unknown, $"Couldn't run \"{program}\". {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// PATH as it is now in the registry: programs installed after AkioExplorer started (or kept running in the tray)
+    /// are found without a restart, the way Explorer picks up environment changes.
+    /// </summary>
+    private static void RefreshPath()
+    {
+        try
+        {
+            string machine = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine) ?? string.Empty;
+            string user = Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User) ?? string.Empty;
+            string fresh = Environment.ExpandEnvironmentVariables(string.Join(';', new[] { machine, user }.Where(p => p.Length > 0)));
+            if (fresh.Length > 0) Environment.SetEnvironmentVariable("Path", fresh);
+        }
+        catch (System.Security.SecurityException)
+        {
+            // Keep the inherited PATH.
         }
     }
 

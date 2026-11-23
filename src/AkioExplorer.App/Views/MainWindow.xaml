@@ -86,8 +86,12 @@
                     </Grid.RowDefinitions>
 
                     <!-- Toolbar: commands act on the active pane. Only working commands are shown. -->
+                    <!-- Floating glass bar: one step above the pane sheets. -->
+                    <Border x:Name="ToolbarGlass" HorizontalAlignment="Left" Margin="4,4,8,0" Padding="2,0"
+                            CornerRadius="{StaticResource GlassCardCornerRadius}" BorderThickness="1"
+                            Background="{ThemeResource GlassFloatBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}">
                     <CommandBar x:Name="Toolbar" DefaultLabelPosition="Right" HorizontalAlignment="Left" Background="Transparent"
-                                Margin="8,4,8,0" IsDynamicOverflowEnabled="True">
+                                IsDynamicOverflowEnabled="True">
                         <AppBarButton Label="New folder" Command="{x:Bind ViewModel.ActivePane.NewFolderCommand, Mode=OneWay}"
                                       ToolTipService.ToolTip="New folder (Ctrl+Shift+N)">
                             <AppBarButton.Icon><FontIcon Glyph="&#xE8F4;" /></AppBarButton.Icon>
@@ -208,6 +212,14 @@
                                     <ToggleMenuFlyoutItem x:Name="ViewExtensions" Text="File name extensions" Click="OnViewExtensionsClick" />
                                     <ToggleMenuFlyoutItem x:Name="ViewFolderSizes" Text="Folder sizes (this PC)" Click="OnViewFolderSizesClick"
                                                           ToolTipService.ToolTip="Calculate folder sizes automatically as you browse" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem Text="Zoom in" Click="OnZoomInMenuClick" KeyboardAcceleratorTextOverride="Ctrl+Plus">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A3;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Zoom out" Click="OnZoomOutMenuClick" KeyboardAcceleratorTextOverride="Ctrl+Minus">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE71F;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Reset zoom" Click="OnZoomResetMenuClick" KeyboardAcceleratorTextOverride="Ctrl+0" />
                                 </MenuFlyout>
                             </AppBarButton.Flyout>
                         </AppBarButton>
@@ -268,8 +280,9 @@
                             </AppBarButton>
                         </CommandBar.SecondaryCommands>
                     </CommandBar>
+                    </Border>
 
-                    <Grid x:Name="PanesGrid" Grid.Row="1">
+                    <Grid x:Name="PanesGrid" Grid.Row="1" Margin="4,8,8,8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -278,16 +291,17 @@
                             <ColumnDefinition x:Name="PreviewColumn" Width="0" />
                         </Grid.ColumnDefinitions>
                         <controls:FilePane x:Name="LeftPaneView" ViewModel="{x:Bind ViewModel.LeftPane}" />
-                        <Rectangle x:Name="PaneDivider" Grid.Column="1" Width="1" Visibility="Collapsed"
-                                   Fill="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <!-- Gap between the two pane sheets (Mica shows through) -->
+                        <Rectangle x:Name="PaneDivider" Grid.Column="1" Width="8" Visibility="Collapsed" Fill="Transparent" />
                         <controls:FilePane x:Name="RightPaneView" Grid.Column="2" Visibility="Collapsed" ViewModel="{x:Bind ViewModel.RightPane}" />
                         <controls:PaneSplitter x:Name="PreviewSplitter" Grid.Column="3" Visibility="Collapsed" />
                         <controls:PreviewPane x:Name="PreviewView" Grid.Column="4" Visibility="Collapsed" />
                     </Grid>
 
                     <!-- Running copy / move operations (only operations longer than ~0.6 s appear) -->
-                    <Border Grid.Row="2" Padding="16,6,8,6" BorderThickness="0,1,0,0"
-                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    <Border Grid.Row="2" Margin="4,0,8,8" Padding="16,6,8,6" BorderThickness="1"
+                            CornerRadius="{StaticResource GlassCardCornerRadius}"
+                            Background="{ThemeResource GlassCardBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}"
                             Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.Operations.HasItems), Mode=OneWay}">
                         <Grid RowSpacing="2">
                         <Grid.RowDefinitions>

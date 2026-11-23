@@ -76,6 +76,9 @@ public sealed class PaneState
     public bool FoldersFirst { get; set; } = true;
     public FileViewMode ViewMode { get; set; } = FileViewMode.Details;
 
+    /// <summary>Browser-style zoom of this pane's rows and tiles, in percent (Ctrl+wheel).</summary>
+    public int Zoom { get; set; } = 100;
+
     /// <summary>Open tabs of this pane (left to right); empty = one tab at <see cref="ProviderId"/>/<see cref="Path"/>.</summary>
     public List<TabState> Tabs { get; set; } = new();
     public int ActiveTab { get; set; }

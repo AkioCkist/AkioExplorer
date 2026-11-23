@@ -528,14 +528,17 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         await NavigateAsync(Location, NavigationKind.Refresh);
     }
 
-    /// <summary>Address bar entry. Accepts folders, files (opens parent and selects it) and env variables.</summary>
+    /// <summary>
+    /// Address bar entry. Accepts folders, files (opens parent and selects it) and env variables; anything else on
+    /// this PC runs as a command in the open folder, like File Explorer (cmd, code ., powershell, a URL…).
+    /// </summary>
     public async Task NavigateToTypedPathAsync(string text)
     {
         if (Provider is null) return;
         string? path = Provider.TryNormalizePath(text);
         if (path is null)
         {
-            ShowError($"Can't find \"{text.Trim()}\". Check the spelling and try again.");
+            if (!await TryRunAsCommandAsync(text)) ShowError($"Can't find \"{text.Trim()}\". Check the spelling and try again.");
             return;
         }
 
@@ -548,7 +551,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         var item = await Provider.GetItemAsync(path, CancellationToken.None);
         if (item is null)
         {
-            ShowError($"Can't find \"{text.Trim()}\". Check the spelling and try again.");
+            if (!await TryRunAsCommandAsync(text)) ShowError($"Can't find \"{text.Trim()}\". Check the spelling and try again.");
             return;
         }
 
@@ -560,6 +563,24 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         {
             await NavigateAsync(new StorageLocation(Provider.Id, parent));
             if (_byPath.TryGetValue(item.Path, out var vm)) SelectionRequested?.Invoke(this, [vm]);
+        }
+    }
+
+    /// <summary>Local panes only: the folder shown is the working directory (This PC: the user's profile).</summary>
+    private async Task<bool> TryRunAsCommandAsync(string text)
+    {
+        if (!IsLocalProvider || Location is null) return false;
+        string folder = Location.Path.Length > 0 && Directory.Exists(Location.Path)
+            ? Location.Path
+            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        try
+        {
+            return await Task.Run(() => _shellActions.RunCommand(text, folder));
+        }
+        catch (StorageException ex)
+        {
+            ShowError(ex.Message);
+            return true; // found but failed: that message, not "can't find"
         }
     }
 
@@ -1518,6 +1539,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         SortDescending = SortDescending,
         FoldersFirst = FoldersFirst,
         ViewMode = ViewMode,
+        Zoom = Columns.Zoom,
         Tabs = Tabs.Count > 1 ? CaptureTabs() : new(),
         ActiveTab = Math.Max(0, ActiveTabIndex),
     };
@@ -1528,6 +1550,7 @@ public sealed partial class FilePaneViewModel : ObservableObject, IDisposable
         _sortField = state.SortField;
         _foldersFirst = state.FoldersFirst;
         _viewMode = state.ViewMode;
+        Columns.Zoom = state.Zoom;
         OnPropertyChanged(nameof(FoldersFirst));
         OnPropertyChanged(nameof(SortField));
         OnPropertyChanged(nameof(SortDescending));

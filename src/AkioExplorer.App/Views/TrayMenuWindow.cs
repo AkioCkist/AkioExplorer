@@ -57,7 +57,7 @@ public sealed class TrayMenuWindow : Window
     /// <summary>Shows <paramref name="items"/> at a screen point in physical pixels (the cursor over the tray icon).</summary>
     public void Show(IReadOnlyList<TrayMenuItem> items, int x, int y, ElementTheme theme)
     {
-        _menu?.Hide();
+        HideSafely(_menu);
         _root.RequestedTheme = theme;
         AppWindow.MoveAndResize(new RectInt32(x, y, 1, 1));
         AppWindow.Show();
@@ -76,7 +76,11 @@ public sealed class TrayMenuWindow : Window
             if (ReferenceEquals(_menu, menu)) Dismiss();
         };
 
-        void Open() => menu.ShowAt(_root, new FlyoutShowOptions { Position = new Point(0, 0), ShowMode = FlyoutShowMode.Standard });
+        void Open()
+        {
+            if (!ReferenceEquals(_menu, menu)) return; // a newer Show() (or Dismiss) replaced it before the window loaded
+            menu.ShowAt(_root, new FlyoutShowOptions { Position = new Point(0, 0), ShowMode = FlyoutShowMode.Standard });
+        }
         if (_root.IsLoaded) Open();
         else
         {
@@ -93,7 +97,7 @@ public sealed class TrayMenuWindow : Window
     public void CloseForExit()
     {
         _allowClose = true;
-        _menu?.Hide();
+        HideSafely(_menu);
         Close();
     }
 
@@ -101,8 +105,16 @@ public sealed class TrayMenuWindow : Window
     {
         var menu = _menu;
         _menu = null;
-        menu?.Hide();
+        HideSafely(menu);
         AppWindow.Hide();
+    }
+
+    /// <summary>MenuFlyout.Hide throws (E_INVALIDARG) on a menu that never finished opening.</summary>
+    private static void HideSafely(MenuFlyout? menu)
+    {
+        if (menu is null || !menu.IsOpen) return;
+        try { menu.Hide(); }
+        catch (ArgumentException) { }
     }
 
     private static Style PresenterStyle(ElementTheme theme)

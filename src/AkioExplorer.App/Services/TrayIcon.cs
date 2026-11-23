@@ -119,14 +119,25 @@ public sealed class TrayIcon : IDisposable
         if (msg == WM_APP_TRAY)
         {
             int ev = (int)(lParam.ToInt64() & 0xFFFF);
-            switch (ev)
+            // This runs inside a native callback: an exception here would end the process, not reach
+            // App.UnhandledException, so keep it contained.
+            try
             {
-                case NIN_SELECT or NIN_KEYSELECT or WM_LBUTTONUP or WM_LBUTTONDBLCLK:
-                    _open();
-                    break;
-                case WM_CONTEXTMENU or WM_RBUTTONUP:
-                    ShowMenu();
-                    break;
+                switch (ev)
+                {
+                    case NIN_SELECT or NIN_KEYSELECT or WM_LBUTTONUP or WM_LBUTTONDBLCLK:
+                        _open();
+                        break;
+                    // Version 4 sends WM_CONTEXTMENU *and* WM_RBUTTONUP for one right-click; reacting to both
+                    // opened the menu twice and the second open tore down the first while it was still opening.
+                    case WM_CONTEXTMENU:
+                        ShowMenu();
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Tray icon event {ev:X} failed: {ex}");
             }
             return IntPtr.Zero;
         }

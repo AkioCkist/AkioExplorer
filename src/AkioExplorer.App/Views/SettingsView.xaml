@@ -9,7 +9,8 @@
     xmlns:vm="using:AkioExplorer.App.ViewModels">
 
     <!-- OneCommander-style: categories on the left, a search box that finds any setting, sections on the right. -->
-    <Grid x:Name="Layout" ColumnSpacing="8">
+    <Grid x:Name="Layout" ColumnSpacing="8" Margin="4,4,8,8" CornerRadius="{StaticResource GlassCardCornerRadius}" BorderThickness="1"
+          Background="{ThemeResource GlassCardBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="SidebarColumn" Width="220" />
             <ColumnDefinition Width="*" />

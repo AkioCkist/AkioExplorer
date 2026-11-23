@@ -40,6 +40,9 @@ public enum IconSize
 {
     Small,
     Large,
+
+    /// <summary>256 px, for zoomed-in grid tiles. Types without a real 256 px icon return nothing (keep Large).</summary>
+    Jumbo,
 }
 
 public interface IShellIconExtractor
@@ -65,4 +68,10 @@ public interface IShellActions
 
     /// <summary>Opens Windows Terminal (or PowerShell when it isn't installed) in <paramref name="folder"/>.</summary>
     void OpenTerminal(string folder, TerminalApp app = TerminalApp.WindowsTerminal);
+
+    /// <summary>
+    /// Runs address-bar text as a command (<c>cmd</c>, <c>code .</c>, a URL…) in <paramref name="folder"/>.
+    /// False when Windows can't find the program.
+    /// </summary>
+    bool RunCommand(string commandLine, string folder);
 }

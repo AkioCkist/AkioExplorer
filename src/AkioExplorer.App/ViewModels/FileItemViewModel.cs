@@ -13,6 +13,7 @@ public sealed partial class FileItemViewModel : ObservableObject
     private readonly IconService _icons;
     private bool _smallRequested;
     private bool _largeRequested;
+    private bool _jumboRequested;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsStarred), nameof(HasLabel), nameof(LabelBrush), nameof(LabelName), nameof(IsMedia), nameof(ShowMediaBadge))]
@@ -66,7 +67,17 @@ public sealed partial class FileItemViewModel : ObservableObject
     private ImageSource? _icon;
 
     public bool HasIcon => Icon is not null;
-    [ObservableProperty] private ImageSource? _largeIcon;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TileIcon))]
+    private ImageSource? _largeIcon;
+
+    /// <summary>256 px icon for zoomed-in tiles (null when the type has none: <see cref="TileIcon"/> falls back).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TileIcon))]
+    private ImageSource? _jumboIcon;
+
+    /// <summary>What a grid tile shows when there is no picture thumbnail.</summary>
+    public ImageSource? TileIcon => JumboIcon ?? LargeIcon;
 
     /// <summary>Picture thumbnail for grid view (photo, video frame…); null shows <see cref="LargeIcon"/>.</summary>
     [ObservableProperty]
@@ -77,6 +88,9 @@ public sealed partial class FileItemViewModel : ObservableObject
 
     /// <summary>Set once the thumbnail was fetched or found not to exist (see ThumbnailService).</summary>
     public bool ThumbnailRequested { get; set; }
+
+    /// <summary>Pixel size of the thumbnail fetched so far; zooming in past it fetches a bigger one.</summary>
+    public int ThumbnailPixelSize { get; set; }
     [ObservableProperty] private bool _isRenaming;
     [ObservableProperty] private string _editName = string.Empty;
     [ObservableProperty] private bool _isDropTarget;
@@ -128,6 +142,7 @@ public sealed partial class FileItemViewModel : ObservableObject
         if (item.Modified != Item.Modified || item.Size != Item.Size || iconChanged)
         {
             ThumbnailRequested = false; // content changed: fetch a fresh thumbnail when shown
+            ThumbnailPixelSize = 0;
             Thumbnail = null;
         }
         Item = item;
@@ -137,8 +152,8 @@ public sealed partial class FileItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Path));
         if (iconChanged)
         {
-            _smallRequested = _largeRequested = false;
-            Icon = LargeIcon = null;
+            _smallRequested = _largeRequested = _jumboRequested = false;
+            Icon = LargeIcon = JumboIcon = null;
         }
     }
 
@@ -151,11 +166,17 @@ public sealed partial class FileItemViewModel : ObservableObject
             _smallRequested = true;
             Icon = await _icons.GetAsync(Item, size);
         }
-        else
+        else if (size == IconSize.Large)
         {
             if (_largeRequested) return;
             _largeRequested = true;
             LargeIcon = await _icons.GetAsync(Item, size);
+        }
+        else
+        {
+            if (_jumboRequested) return;
+            _jumboRequested = true;
+            JumboIcon = await _icons.GetAsync(Item, size);
         }
     }
 

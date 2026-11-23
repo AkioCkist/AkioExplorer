@@ -50,6 +50,7 @@ public sealed partial class MainWindow : Window
         _logger = logger;
         _cloud = cloud;
         InitializeComponent();
+        AddZoomAccelerators();
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -1232,6 +1233,37 @@ public sealed partial class MainWindow : Window
     private void OnTerminalAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.OpenTerminalCommand.Execute(null));
 
     private void OnEditorAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a) => Run(a, p => p.OpenInEditorCommand.Execute(null));
+
+    // ------------------------------------------------------------------ zoom (browser keys; Ctrl+wheel / pinch live in FilePane)
+
+    private void AddZoomAccelerators()
+    {
+        const Windows.System.VirtualKey OemPlus = (Windows.System.VirtualKey)187, OemMinus = (Windows.System.VirtualKey)189; // the "=/+" and "-" keys beside Backspace
+        foreach (var (key, step) in new[] { (OemPlus, 1), (Windows.System.VirtualKey.Add, 1), (OemMinus, -1), (Windows.System.VirtualKey.Subtract, -1), (Windows.System.VirtualKey.Number0, 0), (Windows.System.VirtualKey.NumberPad0, 0) })
+        {
+            var accelerator = new KeyboardAccelerator { Modifiers = Windows.System.VirtualKeyModifiers.Control, Key = key };
+            accelerator.Invoked += (_, a) =>
+            {
+                a.Handled = true;
+                Zoom(step);
+            };
+            RootGrid.KeyboardAccelerators.Add(accelerator);
+        }
+    }
+
+    /// <summary>+1 / -1 one step, 0 back to 100 %, on the active pane.</summary>
+    private void Zoom(int step)
+    {
+        var pane = ViewFor(ViewModel.ActivePane);
+        if (step == 0) pane.ResetZoom();
+        else pane.ZoomBy(step);
+    }
+
+    private void OnZoomInMenuClick(object sender, RoutedEventArgs e) => Zoom(1);
+
+    private void OnZoomOutMenuClick(object sender, RoutedEventArgs e) => Zoom(-1);
+
+    private void OnZoomResetMenuClick(object sender, RoutedEventArgs e) => Zoom(0);
 
     private void OnHiddenItemsAccelerator(KeyboardAccelerator s, KeyboardAcceleratorInvokedEventArgs a)
     {

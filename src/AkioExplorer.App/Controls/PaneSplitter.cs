@@ -31,8 +31,9 @@ public sealed partial class PaneSplitter : Grid
         AutomationProperties.SetName(this, "Resize preview pane");
         ToolTipService.SetToolTip(this, "Drag to resize · double-click to reset");
 
-        _line = new Rectangle { Width = 1, HorizontalAlignment = HorizontalAlignment.Center };
-        _line.Fill = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"];
+        // At rest the gap between the glass sheets is the divider; the grip only shows on hover/drag.
+        _line = new Rectangle { Width = 2, RadiusX = 1, RadiusY = 1, Margin = new Thickness(0, 24, 0, 24), HorizontalAlignment = HorizontalAlignment.Center };
+        _line.Fill = new SolidColorBrush(Colors.Transparent);
         Children.Add(_line);
 
         PointerPressed += OnPointerPressed;
@@ -40,7 +41,7 @@ public sealed partial class PaneSplitter : Grid
         PointerReleased += (_, e) => EndDrag(e);
         PointerCaptureLost += (_, _) => { if (_dragging) { _dragging = false; Committed?.Invoke(this, EventArgs.Empty); } };
         PointerEntered += (_, _) => _line.Fill = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
-        PointerExited += (_, _) => { if (!_dragging) _line.Fill = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"]; };
+        PointerExited += (_, _) => { if (!_dragging) _line.Fill = new SolidColorBrush(Colors.Transparent); };
         DoubleTapped += (_, _) => { TargetWidth = DefaultWidth; Committed?.Invoke(this, EventArgs.Empty); };
         KeyDown += OnKeyDown;
     }
@@ -87,7 +88,7 @@ public sealed partial class PaneSplitter : Grid
     {
         if (!_dragging) return;
         _dragging = false;
-        ReleasePointerCapture(e.Pointer);
+        _line.Fill = new SolidColorBrush(Colors.Transparent);
         _line.Fill = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"];
         Committed?.Invoke(this, EventArgs.Empty);
         e.Handled = true;

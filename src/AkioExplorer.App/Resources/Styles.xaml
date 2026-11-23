@@ -3,6 +3,81 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!--
+        Glass surfaces. Three depth steps over the window's Mica:
+          0  Mica          sidebar, title bar (the "table")
+          1  Glass card    file panes, preview, transfers, settings (translucent sheet, lit rim)
+          2  Glass float   toolbar (a little brighter, it sits above the cards)
+        and one step *down*: inset wells (address bar, search, preview well) read as pressed into the glass.
+        All plain brushes on top of Mica, no extra blur pass: Mica already blurs the wallpaper, so this costs
+        nothing per frame while scrolling thumbnails.
+        The rim is the liquid-glass cue: light catches the top edge, the bottom edge falls into shade.
+    -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <LinearGradientBrush x:Key="GlassCardBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#14FFFFFF" />
+                <GradientStop Offset="1" Color="#0AFFFFFF" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="GlassFloatBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#21FFFFFF" />
+                <GradientStop Offset="1" Color="#12FFFFFF" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="GlassRimBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#5CFFFFFF" />
+                <GradientStop Offset="0.08" Color="#1FFFFFFF" />
+                <GradientStop Offset="0.6" Color="#0DFFFFFF" />
+                <GradientStop Offset="1" Color="#33000000" />
+            </LinearGradientBrush>
+            <SolidColorBrush x:Key="GlassInsetBackgroundBrush" Color="#2E000000" />
+            <SolidColorBrush x:Key="GlassInsetBackgroundPointerOverBrush" Color="#3D000000" />
+            <LinearGradientBrush x:Key="GlassInsetBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#40000000" />
+                <GradientStop Offset="1" Color="#1FFFFFFF" />
+            </LinearGradientBrush>
+            <!-- The panes draw their own glass, so NavigationView's flat content layer goes away. -->
+            <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <LinearGradientBrush x:Key="GlassCardBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#C7FFFFFF" />
+                <GradientStop Offset="1" Color="#A6FFFFFF" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="GlassFloatBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#E6FFFFFF" />
+                <GradientStop Offset="1" Color="#C2FFFFFF" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="GlassRimBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#FFFFFFFF" />
+                <GradientStop Offset="0.08" Color="#D9FFFFFF" />
+                <GradientStop Offset="0.6" Color="#12000000" />
+                <GradientStop Offset="1" Color="#24000000" />
+            </LinearGradientBrush>
+            <SolidColorBrush x:Key="GlassInsetBackgroundBrush" Color="#0F000000" />
+            <SolidColorBrush x:Key="GlassInsetBackgroundPointerOverBrush" Color="#17000000" />
+            <LinearGradientBrush x:Key="GlassInsetBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0" Color="#1F000000" />
+                <GradientStop Offset="1" Color="#CCFFFFFF" />
+            </LinearGradientBrush>
+            <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+            <SolidColorBrush x:Key="GlassCardBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="GlassFloatBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="GlassRimBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="GlassInsetBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="GlassInsetBackgroundPointerOverBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="GlassInsetBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+            <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- Sheets sit 8 apart so a strip of Mica separates them. Inner controls: 12 - 8 padding = 4. -->
+    <CornerRadius x:Key="GlassCardCornerRadius">12</CornerRadius>
+
     <!-- Spacing (Microsoft guidance): 8 between buttons, 12 between content areas, 16 surface to edge. -->
     <Thickness x:Key="PaneBarPadding">8,6,8,6</Thickness>
     <x:Double x:Key="RowHeight">32</x:Double>
@@ -32,10 +107,9 @@
         <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
     </Style>
 
-    <!-- Dense list rows (32 epx) like File Explorer's compact view. -->
+    <!-- Dense list rows (32 epx at 100 % zoom) like File Explorer's compact view; the row template sets the height. -->
     <Style x:Key="FileRowContainerStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-        <Setter Property="MinHeight" Value="32" />
-        <Setter Property="Height" Value="32" />
+        <Setter Property="MinHeight" Value="0" />
         <Setter Property="Padding" Value="8,0,8,0" />
         <Setter Property="Margin" Value="4,0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />

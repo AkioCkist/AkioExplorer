@@ -15,6 +15,7 @@ public sealed class IconService
     private readonly IShellIconExtractor _extractor;
     private readonly Dictionary<string, ImageSource?> _small = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ImageSource?> _large = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ImageSource?> _jumbo = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task<ImageSource?>> _pending = new(StringComparer.OrdinalIgnoreCase);
 
     public IconService(IShellIconExtractor extractor)
@@ -25,24 +26,30 @@ public sealed class IconService
     /// <summary>Synchronous cache lookup (UI thread). Returns false if the icon still needs loading.</summary>
     public bool TryGet(StorageItem item, IconSize size, out ImageSource? icon)
     {
-        var cache = size == IconSize.Small ? _small : _large;
-        return cache.TryGetValue(_extractor.GetIconKey(item), out icon);
+        return CacheFor(size).TryGetValue(_extractor.GetIconKey(item), out icon);
     }
 
     /// <summary>Loads an icon (UI thread only; extraction itself runs on the shell worker thread).</summary>
     public Task<ImageSource?> GetAsync(StorageItem item, IconSize size)
     {
         string key = _extractor.GetIconKey(item);
-        var cache = size == IconSize.Small ? _small : _large;
+        var cache = CacheFor(size);
         if (cache.TryGetValue(key, out var cached)) return Task.FromResult(cached);
 
-        string pendingKey = (size == IconSize.Small ? "s|" : "l|") + key;
+        string pendingKey = size switch { IconSize.Small => "s|", IconSize.Large => "l|", _ => "j|" } + key;
         if (_pending.TryGetValue(pendingKey, out var pending)) return pending;
 
         var task = LoadAsync(item, size, key, cache, pendingKey);
         _pending[pendingKey] = task;
         return task;
     }
+
+    private Dictionary<string, ImageSource?> CacheFor(IconSize size) => size switch
+    {
+        IconSize.Small => _small,
+        IconSize.Large => _large,
+        _ => _jumbo,
+    };
 
     private async Task<ImageSource?> LoadAsync(StorageItem item, IconSize size, string key, Dictionary<string, ImageSource?> cache, string pendingKey)
     {

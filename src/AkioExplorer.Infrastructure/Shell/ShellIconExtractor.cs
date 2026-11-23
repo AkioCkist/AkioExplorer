@@ -79,7 +79,7 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
             return null;
 
         var iid = IID_IImageList;
-        int list = size == IconSize.Large ? SHIL_EXTRALARGE : SHIL_LARGE;
+        int list = size switch { IconSize.Jumbo => SHIL_JUMBO, IconSize.Large => SHIL_EXTRALARGE, _ => SHIL_LARGE };
         if (SHGetImageList(list, ref iid, out var imageList) != 0 || imageList is null)
             return null;
 
@@ -90,7 +90,11 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
 
             try
             {
-                return ToBitmap(hIcon);
+                var bitmap = ToBitmap(hIcon);
+                // Types without a 256 px icon come back as their 48 px icon in the corner of a 256 canvas:
+                // treat that as "no jumbo icon" so the caller keeps the sharp 48 px one, scaled.
+                if (size == IconSize.Jumbo && bitmap is not null && OpaqueExtent(bitmap) <= 48) return null;
+                return bitmap;
             }
             finally
             {
@@ -106,6 +110,21 @@ public sealed class ShellIconExtractor : IShellIconExtractor, IDisposable
         {
             Marshal.ReleaseComObject(imageList);
         }
+    }
+
+    /// <summary>Largest x or y (exclusive) that holds a visible pixel.</summary>
+    private static int OpaqueExtent(IconBitmap bitmap)
+    {
+        int extent = 0;
+        for (int y = 0; y < bitmap.Height; y++)
+        {
+            int row = y * bitmap.Width * 4;
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                if (bitmap.Pixels[row + x * 4 + 3] != 0) extent = Math.Max(extent, Math.Max(x, y) + 1);
+            }
+        }
+        return extent;
     }
 
     internal static unsafe IconBitmap? ToBitmap(IntPtr hIcon)

@@ -100,6 +100,7 @@ public sealed partial class FilePane : UserControl
             vm.PropertyChanged += pane.OnViewModelPropertyChanged;
         }
 
+        pane.AttachZoom(e.OldValue as FilePaneViewModel, e.NewValue as FilePaneViewModel);
         pane.Bindings.Update();
         pane.SyncViewToggles();
         pane.UpdateSearchChips();
@@ -254,9 +255,7 @@ public sealed partial class FilePane : UserControl
             if (sender is GridView) _thumbnails.Cancel(vm);
             return;
         }
-        vm.EnsureIcon(sender is GridView ? IconSize.Large : IconSize.Small);
-        if (sender is GridView && vm.IsMedia) vm.EnsureIcon(IconSize.Small); // the player's icon for the media badge
-        if (sender is GridView) _thumbnails.Request(vm, ViewModel?.Provider);
+        RequestVisuals(vm, sender is GridView); // sizes follow the zoom (FilePane.Zoom.cs)
     }
 
     private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)

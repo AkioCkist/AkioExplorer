@@ -6,7 +6,8 @@
     xmlns:controls="using:AkioExplorer.App.Controls">
 
     <!-- Preview of the active pane's selection: content on top, OneCommander-style details below. -->
-    <Grid x:Name="Root" Padding="12,8,12,8" RowSpacing="10">
+    <Grid x:Name="Root" Padding="12" RowSpacing="12" CornerRadius="{StaticResource GlassCardCornerRadius}" BorderThickness="1"
+          Background="{ThemeResource GlassCardBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition x:Name="ContentRow" Height="*" />
@@ -30,7 +31,8 @@
 
         <!-- Content -->
         <Grid x:Name="ContentHost" Grid.Row="1" CornerRadius="{StaticResource ControlCornerRadius}"
-              Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" MinHeight="120">
+              Background="{ThemeResource GlassInsetBackgroundBrush}" BorderBrush="{ThemeResource GlassInsetBorderBrush}"
+              BorderThickness="1" MinHeight="120">
             <Image x:Name="ImageView" Stretch="Uniform" Visibility="Collapsed" Margin="4" />
 
             <ScrollViewer x:Name="TextScroller" Visibility="Collapsed" HorizontalScrollBarVisibility="Auto"

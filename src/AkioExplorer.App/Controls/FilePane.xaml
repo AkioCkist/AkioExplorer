@@ -10,9 +10,9 @@
     <UserControl.Resources>
         <!-- Details row: compiled bindings, no converters, icon loads when the row is realised. -->
         <DataTemplate x:Key="DetailsRowTemplate" x:DataType="vm:FileItemViewModel">
-            <Grid Height="32" Opacity="{x:Bind Opacity, Mode=OneWay}">
+            <Grid Height="{x:Bind Columns.RowHeight, Mode=OneWay}" Opacity="{x:Bind Opacity, Mode=OneWay}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="Auto" MinWidth="28" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="{x:Bind Columns.DateWidth, Mode=OneWay}" />
                     <ColumnDefinition Width="{x:Bind Columns.TypeWidth, Mode=OneWay}" />
@@ -21,14 +21,16 @@
                 <Border x:Name="DropHighlight" x:Load="{x:Bind IsDropTarget, Mode=OneWay}" Grid.ColumnSpan="5" Margin="-8,1,-8,1"
                         CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                         Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
-                <Image Source="{x:Bind Icon, Mode=OneWay}" Width="20" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                <Image Source="{x:Bind Icon, Mode=OneWay}" Width="{x:Bind Columns.RowIconSize, Mode=OneWay}" Height="{x:Bind Columns.RowIconSize, Mode=OneWay}"
+                       HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,8,0" />
                 <Grid Grid.Column="1" Margin="0,0,12,0" ColumnSpacing="6" Visibility="{x:Bind conv:XamlHelpers.Collapsed(IsRenaming), Mode=OneWay}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="{x:Bind Columns.RowFontSize, Mode=OneWay}"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                     <!-- Marks kept on the cloud service: colour label, favourite -->
                     <Ellipse Grid.Column="1" Width="9" Height="9" VerticalAlignment="Center" Fill="{x:Bind LabelBrush, Mode=OneWay}"
                              Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" ToolTipService.ToolTip="{x:Bind LabelName, Mode=OneWay}" />
@@ -39,31 +41,33 @@
                          Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                          MinHeight="28" Height="28" Padding="8,3,8,0" Margin="-9,0,12,0" VerticalAlignment="Center"
                          Loaded="OnRenameBoxLoaded" KeyDown="OnRenameBoxKeyDown" LostFocus="OnRenameBoxLostFocus" />
-                <TextBlock Grid.Column="2" Text="{x:Bind ModifiedText, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
+                <TextBlock Grid.Column="2" Text="{x:Bind ModifiedText, Mode=OneWay}" FontSize="{x:Bind Columns.RowFontSize, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="3" Text="{x:Bind SecondaryText, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
+                <TextBlock Grid.Column="3" Text="{x:Bind SecondaryText, Mode=OneWay}" FontSize="{x:Bind Columns.RowFontSize, Mode=OneWay}" VerticalAlignment="Center" Margin="0,0,12,0"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                <TextBlock Grid.Column="4" Text="{x:Bind SizeText, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Right"
+                <TextBlock Grid.Column="4" Text="{x:Bind SizeText, Mode=OneWay}" FontSize="{x:Bind Columns.RowFontSize, Mode=OneWay}" VerticalAlignment="Center" HorizontalAlignment="Right"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
             </Grid>
         </DataTemplate>
 
         <DataTemplate x:Key="GridTileTemplate" x:DataType="vm:FileItemViewModel">
-            <Grid Width="108" Height="132" Padding="6,8,6,4" RowSpacing="4" Opacity="{x:Bind Opacity, Mode=OneWay}">
+            <Grid Width="{x:Bind Columns.TileWidth, Mode=OneWay}" Height="{x:Bind Columns.TileHeight, Mode=OneWay}"
+                  Padding="{x:Bind Columns.TilePadding, Mode=OneWay}" RowSpacing="4" Opacity="{x:Bind Opacity, Mode=OneWay}">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="64" />
+                    <RowDefinition Height="{x:Bind Columns.TilePictureRow, Mode=OneWay}" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
                 <Border x:Name="TileDropHighlight" x:Load="{x:Bind IsDropTarget, Mode=OneWay}" Grid.RowSpan="2" Margin="-6,-8,-6,-4"
                         CornerRadius="4" BorderThickness="1" BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                         Background="{ThemeResource AccentFillColorSelectedTextBackgroundBrush}" Opacity="0.35" />
                 <!-- Type icon until (and unless) a picture thumbnail arrives -->
-                <Image Source="{x:Bind LargeIcon, Mode=OneWay}" Width="48" Height="48"
+                <Image Source="{x:Bind TileIcon, Mode=OneWay}" Width="{x:Bind Columns.TileIconSize, Mode=OneWay}" Height="{x:Bind Columns.TileIconSize, Mode=OneWay}"
                        Visibility="{x:Bind conv:XamlHelpers.Collapsed(HasThumbnail), Mode=OneWay}" />
                 <!-- Sized to the picture, so the video badge sits on the picture's own corner -->
                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
                       Visibility="{x:Bind conv:XamlHelpers.Visible(HasThumbnail), Mode=OneWay}">
-                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}" MaxWidth="96" MaxHeight="64" Stretch="Uniform" />
+                    <Image Source="{x:Bind Thumbnail, Mode=OneWay}" Stretch="Uniform"
+                           MaxWidth="{x:Bind Columns.TilePictureWidth, Mode=OneWay}" MaxHeight="{x:Bind Columns.TilePictureHeight, Mode=OneWay}" />
                     <!-- Video / music: the default player's icon on the corner, no backdrop (play glyph until that icon loads) -->
                     <Grid Width="20" Height="20" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2,2"
                           Visibility="{x:Bind conv:XamlHelpers.Visible(ShowMediaBadge), Mode=OneWay}">
@@ -76,9 +80,9 @@
                              Visibility="{x:Bind conv:XamlHelpers.Visible(HasLabel), Mode=OneWay}" />
                     <FontIcon Glyph="&#xE735;" FontSize="12" Foreground="#F5C30F" Visibility="{x:Bind conv:XamlHelpers.Visible(IsStarred), Mode=OneWay}" />
                 </StackPanel>
-                <StackPanel Grid.Row="1" Spacing="4">
+                <StackPanel Grid.Row="1" Spacing="4" Visibility="{x:Bind conv:XamlHelpers.Visible(Columns.ShowTileNames), Mode=OneWay}">
                     <!-- Rename in grid view happens in a wide popup under the tile (RenamePopup), not in this narrow cell. -->
-                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="12" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"
+                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="{x:Bind Columns.TileFontSize, Mode=OneWay}" TextAlignment="Center" TextWrapping="Wrap" MaxLines="2"
                                TextTrimming="CharacterEllipsis" />
                     <ProgressBar x:Name="DriveBar" x:Load="{x:Bind IsDrive}" Value="{x:Bind DriveUsage, Mode=OneWay}" Maximum="100" Margin="6,0" />
                 </StackPanel>
@@ -86,7 +90,9 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <Grid x:Name="Root" Background="Transparent">
+    <!-- The pane is one glass sheet; MainWindow leaves Mica gaps around it. -->
+    <Grid x:Name="Root" CornerRadius="{StaticResource GlassCardCornerRadius}" BorderThickness="1"
+          Background="{ThemeResource GlassCardBackgroundBrush}" BorderBrush="{ThemeResource GlassRimBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -194,7 +200,22 @@
                  CanReorderTabs="True" CanDragTabs="False" AllowDropTabs="False" TabWidthMode="Equal" IsTabStop="False"
                  Margin="4,4,4,0" AutomationProperties.Name="Tabs">
             <TabView.Resources>
-                <SolidColorBrush x:Key="TabViewBackground" Color="Transparent" />
+                <ResourceDictionary>
+                    <!-- Local theme dictionaries (not StaticResource aliases) so a live theme switch repaints them. -->
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Default">
+                            <SolidColorBrush x:Key="TabViewBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#1AFFFFFF" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="Light">
+                            <SolidColorBrush x:Key="TabViewBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="#D9FFFFFF" />
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="HighContrast">
+                            <SolidColorBrush x:Key="TabViewBackground" Color="Transparent" />
+                        </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
             </TabView.Resources>
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:PaneTab">
@@ -212,6 +233,44 @@
             </TabView.TabItemTemplate>
         </TabView>
         <Grid Padding="{StaticResource PaneBarPadding}" ColumnSpacing="8">
+            <!-- Address and search are wells pressed into the glass (focused state keeps the system look). -->
+            <Grid.Resources>
+                <ResourceDictionary>
+                    <!-- Same values as GlassInset* in Styles.xaml; local so a live theme switch repaints them.
+                         Disabled icon buttons (Back/Forward) lose the grey tile: the dimmed glyph already says "disabled". -->
+                    <ResourceDictionary.ThemeDictionaries>
+                        <ResourceDictionary x:Key="Default">
+                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackground" Color="#2E000000" />
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#3D000000" />
+                        <LinearGradientBrush x:Key="TextControlBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0" Color="#40000000" />
+                            <GradientStop Offset="1" Color="#1FFFFFFF" />
+                        </LinearGradientBrush>
+                        <LinearGradientBrush x:Key="TextControlBorderBrushPointerOver" StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0" Color="#40000000" />
+                            <GradientStop Offset="1" Color="#1FFFFFFF" />
+                        </LinearGradientBrush>
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="Light">
+                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackground" Color="#0F000000" />
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#17000000" />
+                        <LinearGradientBrush x:Key="TextControlBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0" Color="#1F000000" />
+                            <GradientStop Offset="1" Color="#CCFFFFFF" />
+                        </LinearGradientBrush>
+                        <LinearGradientBrush x:Key="TextControlBorderBrushPointerOver" StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0" Color="#1F000000" />
+                            <GradientStop Offset="1" Color="#CCFFFFFF" />
+                        </LinearGradientBrush>
+                        </ResourceDictionary>
+                        <ResourceDictionary x:Key="HighContrast" />
+                    </ResourceDictionary.ThemeDictionaries>
+                </ResourceDictionary>
+            </Grid.Resources>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -243,8 +302,8 @@
             </StackPanel>
 
             <Grid x:Name="AddressHost" Grid.Column="1" Height="32" CornerRadius="{ThemeResource ControlCornerRadius}"
-                  Background="{ThemeResource ControlFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                  BorderThickness="1" Tapped="OnAddressTapped" ToolTipService.ToolTip="Click to type a path (Ctrl+L)">
+                  Background="{ThemeResource GlassInsetBackgroundBrush}" BorderBrush="{ThemeResource GlassInsetBorderBrush}"
+                  BorderThickness="1" Tapped="OnAddressTapped" ToolTipService.ToolTip="Click to type a path, or a command to run here such as cmd or code . (Ctrl+L)">
                 <BreadcrumbBar x:Name="Crumbs" ItemsSource="{x:Bind ViewModel.Breadcrumb, Mode=OneWay}" ItemClicked="OnCrumbClicked"
                                VerticalAlignment="Center" Margin="6,0,6,0" />
                 <AutoSuggestBox x:Name="AddressBox" Visibility="Collapsed" VerticalAlignment="Center" BorderThickness="0" Margin="-1"
@@ -516,7 +575,8 @@
                       AutomationProperties.Name="Files"
                       SelectionChanged="OnListSelectionChanged" DoubleTapped="OnListDoubleTapped"
                       PreviewKeyDown="OnListPreviewKeyDown" CharacterReceived="OnListCharacterReceived"
-                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested" />
+                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested"
+                      Loaded="OnListLoaded" />
 
             <GridView x:Name="TilesGrid" x:Load="{x:Bind ViewModel.IsGridView, Mode=OneWay}"
                       ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}"
@@ -527,7 +587,32 @@
                       AutomationProperties.Name="Files"
                       SelectionChanged="OnListSelectionChanged" DoubleTapped="OnListDoubleTapped"
                       PreviewKeyDown="OnListPreviewKeyDown" CharacterReceived="OnListCharacterReceived"
-                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested" />
+                      ContainerContentChanging="OnContainerContentChanging" ContextRequested="OnListContextRequested"
+                      Loaded="OnListLoaded" />
+
+            <!-- Zoom bubble (browser style): appears on Ctrl+wheel / pinch / Ctrl +-0, hides itself after a moment. -->
+            <Border x:Name="ZoomBubble" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,12,0"
+                    Padding="14,4,4,4" CornerRadius="8" BorderThickness="1" Opacity="0" IsHitTestVisible="False"
+                    Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}" BorderBrush="{ThemeResource GlassRimBrush}"
+                    PointerEntered="OnZoomBubblePointerEntered" PointerExited="OnZoomBubblePointerExited">
+                <Border.OpacityTransition>
+                    <ScalarTransition Duration="0:0:0.15" />
+                </Border.OpacityTransition>
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <TextBlock x:Name="ZoomBubbleText" Text="100%" MinWidth="48" VerticalAlignment="Center"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.LiveSetting="Polite" />
+                    <Button Style="{StaticResource ToolIconButtonStyle}" Width="32" Click="OnZoomOutClick"
+                            ToolTipService.ToolTip="Zoom out (Ctrl+Minus)" AutomationProperties.Name="Zoom out">
+                        <FontIcon Glyph="&#xE738;" FontSize="12" />
+                    </Button>
+                    <Button Style="{StaticResource ToolIconButtonStyle}" Width="32" Click="OnZoomInClick"
+                            ToolTipService.ToolTip="Zoom in (Ctrl+Plus)" AutomationProperties.Name="Zoom in">
+                        <FontIcon Glyph="&#xE710;" FontSize="12" />
+                    </Button>
+                    <Button x:Name="ZoomResetButton" Content="Reset" Height="28" Padding="12,0" Margin="6,0,0,0" Click="OnZoomResetClick"
+                            ToolTipService.ToolTip="Back to 100% (Ctrl+0)" />
+                </StackPanel>
+            </Border>
 
             <ProgressBar VerticalAlignment="Top" IsIndeterminate="True" Margin="12,0"
                          Visibility="{x:Bind conv:XamlHelpers.Visible(ViewModel.IsLoading), Mode=OneWay}" />
@@ -573,6 +658,14 @@
             <TextBlock x:Name="StatusLabel" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
             <TextBlock x:Name="SelectionLabel" Grid.Column="1" Style="{StaticResource StatusTextStyle}" Text="{x:Bind ViewModel.SelectionText, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                <Button x:Name="ZoomStatusButton" Height="28" Padding="8,0" Background="Transparent" BorderThickness="0"
+                        Visibility="Collapsed" Click="OnZoomStatusClick" Margin="0,0,4,0"
+                        ToolTipService.ToolTip="Zoom (Ctrl+wheel or pinch) · click to change or reset">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE71E;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="ZoomStatusText" Style="{StaticResource StatusTextStyle}" />
+                    </StackPanel>
+                </Button>
                 <ToggleButton x:Name="DetailsToggle" Width="32" Height="28" Padding="0" Click="OnDetailsToggleClick" ToolTipService.ToolTip="Details (Ctrl+Shift+6)"
                               AutomationProperties.Name="Details view" Background="Transparent" BorderThickness="0">
                     <FontIcon Glyph="&#xE8FD;" FontSize="14" />
